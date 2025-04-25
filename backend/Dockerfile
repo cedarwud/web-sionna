@@ -1,0 +1,51 @@
+# backend/Dockerfile
+
+# 1. 使用官方 Python 鏡像 (與您的環境匹配, e.g., 3.11)
+FROM python:3.11-slim
+
+# 2. 設定工作目錄
+WORKDIR /app
+
+# 3. 設定環境變量
+# ENV CUDA_VISIBLE_DEVICES="-1" 強制使用 CPU (根據您的情況調整或移除)
+# 防止 Python 寫入 .pyc 文件
+ENV PYTHONDONTWRITEBYTECODE=1
+# 強制 stdout/stderr 不緩存，方便看日誌
+ENV PYTHONUNBUFFERED=1
+# 減少 TensorFlow 日誌
+ENV TF_CPP_MIN_LOG_LEVEL="3"
+# 讓 Dr.Jit 能找到 LLVM shared lib
+ENV DRJIT_LIBLLVM_PATH=/usr/lib/x86_64-linux-gnu/libLLVM-14.so.1
+
+
+# 4. 安裝系統依賴（LLVM 開發＋運行時庫）
+#    - 原有的 LLVM 相關
+#    - 新增: build-essential, libpq-dev (PostgreSQL), gdal-bin, libgdal-dev (GDAL/PostGIS)
+#    - 新增: postgresql-client (用於 psql command, 可選但方便除錯)
+#    - 新增: postgis (PostGIS extension 相關工具, 通常由 postgis/postgis image 提供，但客戶端工具可能有幫助)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    llvm-dev \
+    libllvm14 \
+    build-essential \
+    libpq-dev \
+    gdal-bin \
+    libgdal-dev \
+    postgresql-client \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+
+# 5. 複製依賴文件並安裝 Python 依賴
+# 先複製 requirements.txt 可以利用 Docker 的層緩存
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+	pip install --no-cache-dir -r requirements.txt
+
+# 6. 複製應用程式碼到工作目錄
+# COPY . .
+
+# 7. 暴露 Uvicorn 運行的端口
+EXPOSE 8000
+
+# 8. 容器啟動時運行的命令
+# 注意：這裡不加 --reload，因為開發時會用 volume 掛載 + compose 控制
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
