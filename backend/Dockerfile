@@ -23,7 +23,7 @@ ENV DRJIT_LIBLLVM_PATH=/usr/lib/x86_64-linux-gnu/libLLVM-14.so.1
 #    - 新增: build-essential, libpq-dev (PostgreSQL), gdal-bin, libgdal-dev (GDAL/PostGIS)
 #    - 新增: postgresql-client (用於 psql command, 可選但方便除錯)
 #    - 新增: postgis (PostGIS extension 相關工具, 通常由 postgis/postgis image 提供，但客戶端工具可能有幫助)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt update && apt install -y --no-install-recommends \
     llvm-dev \
     libllvm14 \
     build-essential \
@@ -31,7 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gdal-bin \
     libgdal-dev \
     postgresql-client \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    curl \
+    && apt clean && rm -rf /var/lib/apt/lists/*
 
 
 # 5. 複製依賴文件並安裝 Python 依賴
@@ -48,4 +49,4 @@ EXPOSE 8000
 
 # 8. 容器啟動時運行的命令
 # 注意：這裡不加 --reload，因為開發時會用 volume 掛載 + compose 控制
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -50,6 +50,16 @@ services:
       db:
         condition: service_healthy # 等待 DB healthcheck 成功
     # command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload # 開發時可取消註釋
+    healthcheck: # <--- 新增 FastAPI 的 healthcheck
+      # 嘗試連接 FastAPI 的根路徑 "/"。需要 curl。
+      # test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      # 或者，如果不想安裝 curl，可以嘗試用 python 簡易檢查端口 (需要 python 在基礎鏡像中)
+      test: ["CMD-SHELL", "python -c 'import socket; s = socket.create_connection((\"localhost\", 8000), timeout=5)' || exit 1"]
+      interval: 10s       # 每 10 秒檢查一次
+      timeout: 5s         # 每次檢查超時 5 秒
+      retries: 5          # 重試 5 次失敗後標記為不健康
+      start_period: 30s   # 啟動後等待 30 秒再開始健康檢查 (給 FastAPI 足夠的啟動時間)
+
 
   react-swc:
     build:
@@ -64,7 +74,8 @@ services:
     networks:
       - sionna-net
     depends_on: # React 通常依賴 FastAPI
-      - fastapi
+      fastapi: # <--- 修改依賴條件
+        condition: service_healthy # 等待 fastapi 健康檢查通過
 
 networks:
   sionna-net:

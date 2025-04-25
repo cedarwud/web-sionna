@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react'
 
 // 指向新的後端 API 端點
-const CONSTELLATION_ENDPOINT = '/api/constellation-diagram' // 使用相對路徑，透過 Vite 代理
+const CONSTELLATION_ENDPOINT = '/api/v1/sionna/constellation-diagram' // 使用相對路徑，透過 Vite 代理
 
 const ConstellationViewer: React.FC = () => {
     const [imageUrl, setImageUrl] = useState<string | null>(null)
