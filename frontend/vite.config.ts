@@ -16,6 +16,11 @@ export default defineConfig({
                 // rewrite: (path) => path.replace(/^\/api/, '') // 只有當後端 API 路徑本身不包含 /api 前綴時才需要使用 rewrite
                 // 在您的情況下，後端是 @app.get("/api/scene-image")，所以通常不需要 rewrite
             },
+            // 增加對靜態文件的代理
+            '/rendered_images': {
+                target: 'http://fastapi:8000',
+                changeOrigin: true,
+            },
         },
     },
 })

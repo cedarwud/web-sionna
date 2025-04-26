@@ -3,31 +3,30 @@ import React, { useState, useEffect } from 'react'
 
 // 定義 Props 接口
 interface SceneViewerProps {
-    viewType: 'original' | 'rt' // 接收來自 App 的視圖類型
+    // viewType 屬性已移除
 }
 
-const SceneViewer: React.FC<SceneViewerProps> = ({ viewType }) => {
-    // <--- 接收 viewType prop
+// 定義靜態路徑指向後端存儲的最後一次成功渲染的圖像
+const FALLBACK_IMAGE_PATH = '/rendered_images/scene_with_paths.png'
+
+const SceneViewer: React.FC<SceneViewerProps> = () => {
     console.log('--- SceneViewer Component Rendered ---')
     const [imageUrl, setImageUrl] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState<boolean>(true)
     const [error, setError] = useState<string | null>(null)
     const [prevImageUrl, setPrevImageUrl] = useState<string | null>(null) // State to hold previous URL for cleanup
+    const [usingFallback, setUsingFallback] = useState<boolean>(false)
 
     useEffect(() => {
-        console.log(
-            `--- SceneViewer useEffect triggered, viewType: ${viewType} ---`
-        )
+        console.log('--- SceneViewer useEffect triggered ---')
 
-        const originalEndpoint = '/api/v1/sionna/scene-image-original' // <--- 確認路徑正確
-        const rtEndpoint = '/api/v1/sionna/scene-image-rt' // <--- 確認路徑正確
-
-        const endpoint = viewType === 'original' ? originalEndpoint : rtEndpoint
+        const rtEndpoint = '/api/v1/sionna/scene-image-rt' // 直接使用 rt 端點
 
         // ***** 將 fetchImage 宣告為 async 函數 *****
         const fetchImage = async () => {
             setIsLoading(true)
             setError(null)
+            setUsingFallback(false)
 
             // 清理上一個 createObjectURL (如果存在)
             // 將清理邏輯移到這裡，確保在設定新 URL 前清理
@@ -39,12 +38,18 @@ const SceneViewer: React.FC<SceneViewerProps> = ({ viewType }) => {
             // 清除當前顯示的圖像，避免切換時閃爍舊圖
             setImageUrl(null)
 
-            const endpointWithCacheBuster = `${endpoint}?t=${new Date().getTime()}`
+            const endpointWithCacheBuster = `${rtEndpoint}?t=${new Date().getTime()}`
             console.log(`Fetching image from: ${endpointWithCacheBuster}`)
 
             try {
-                // 使用 fetch API 進行請求
-                const response = await fetch(endpointWithCacheBuster) // <--- await 現在合法了
+                // 使用 fetch API 進行請求，添加超時處理
+                const controller = new AbortController()
+                const timeoutId = setTimeout(() => controller.abort(), 10000) // 10秒超時
+
+                const response = await fetch(endpointWithCacheBuster, {
+                    signal: controller.signal,
+                })
+                clearTimeout(timeoutId)
 
                 if (!response.ok) {
                     // 嘗試讀取錯誤訊息 (如果後端返回 JSON)
@@ -77,19 +82,26 @@ const SceneViewer: React.FC<SceneViewerProps> = ({ viewType }) => {
                 // 考慮是否在成功獲取 blob 後就設定 isLoading 為 false
                 // setIsLoading(false); // <--- 可以在這裡或 onLoad 中設定
             } catch (error) {
-                console.error(`Failed to fetch image from ${endpoint}:`, error)
-                setError(
-                    `無法載入 ${
-                        viewType === 'original' ? '原始場景' : '帶路徑場景'
-                    } (${error instanceof Error ? error.message : '未知錯誤'})`
+                console.error(
+                    `Failed to fetch image from ${rtEndpoint}:`,
+                    error
                 )
-                setIsLoading(false) // 載入失敗，結束 loading
-                setImageUrl(null) // 清除圖像
-                // 如果有上一個 URL 且尚未清理，也清理掉
-                if (prevImageUrl) {
-                    URL.revokeObjectURL(prevImageUrl)
-                    setPrevImageUrl(null)
-                }
+                console.log('Using fallback image:', FALLBACK_IMAGE_PATH)
+
+                // 使用備用圖像
+                setImageUrl(FALLBACK_IMAGE_PATH)
+                setUsingFallback(true)
+                setError(
+                    `嘗試重新連接後端中...(${
+                        error instanceof Error ? error.message : '未知錯誤'
+                    })`
+                )
+
+                // 設定定時器嘗試重新獲取最新圖像
+                setTimeout(() => {
+                    console.log('Attempting to reconnect to backend...')
+                    fetchImage() // 遞迴調用自己，再次嘗試
+                }, 5000) // 每5秒嘗試一次
             }
         }
 
@@ -107,13 +119,15 @@ const SceneViewer: React.FC<SceneViewerProps> = ({ viewType }) => {
                 )
             }
         }
-        // 依賴保持不變
-    }, [viewType])
+        // 依賴陣列為空，因爲不再依賴 viewType
+    }, [])
 
     const handleImageLoad = () => {
         console.log(`Image element loaded successfully: ${imageUrl}`)
         setIsLoading(false) // 圖片成功顯示後，確認 loading 結束
-        setError(null) // 清除之前的錯誤
+        if (!usingFallback) {
+            setError(null) // 只有非備用圖像時才清除錯誤
+        }
     }
 
     const handleImageError = (
@@ -121,26 +135,41 @@ const SceneViewer: React.FC<SceneViewerProps> = ({ viewType }) => {
     ) => {
         // 這個錯誤通常表示圖片 URL 有問題或圖片本身損壞
         console.error(`Image element failed to load src: ${imageUrl}`, e)
-        setError(`圖片載入失敗 (URL: ${imageUrl})`)
+
+        // 如果是備用圖像也載入失敗，那麼顯示錯誤訊息
+        if (usingFallback || imageUrl === FALLBACK_IMAGE_PATH) {
+            setError(`備用圖片也無法載入，請檢查網絡連接`)
+        } else {
+            // 嘗試使用備用圖像
+            console.log(
+                'Regular image failed, trying fallback:',
+                FALLBACK_IMAGE_PATH
+            )
+            setImageUrl(FALLBACK_IMAGE_PATH)
+            setUsingFallback(true)
+            setError(`使用最後一次成功的圖像 (無法連接後端服務)`)
+        }
+
         setIsLoading(false) // 確保 loading 結束
-        setImageUrl(null) // 清除無效的 URL
     }
 
-    // ... (title 和 return 部分保持不變) ...
-    const title =
-        viewType === 'original' ? '原始場景 (Etoile)' : '場景與路徑 (Etoile)'
+    // 使用固定標題
+    const title = '場景與路徑 (Etoile)'
 
     return (
         <div>
-            <h2>{title}</h2> {/* 使用動態標題 */}
             {isLoading && <p>正在載入圖片...</p>}
-            {error && <p style={{ color: 'red' }}>錯誤: {error}</p>}
+            {error && (
+                <p style={{ color: usingFallback ? 'orange' : 'red' }}>
+                    狀態: {error}
+                </p>
+            )}
             {/* 只有在 imageUrl 存在且 loading 完成後才顯示 img，或在 loading 時顯示佔位符 */}
             {imageUrl && (
                 <img
                     key={imageUrl} // 使用 key 確保 URL 變化時 img 元素刷新
                     src={imageUrl}
-                    alt={title} // 使用動態 alt
+                    alt={title}
                     onLoad={handleImageLoad}
                     onError={handleImageError}
                     style={{
