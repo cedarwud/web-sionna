@@ -27,15 +27,19 @@ if not DATABASE_URL.startswith("postgresql+asyncpg"):
 
 
 # --- Sionna/Simulation Constants ---
-# Define the path relative to the backend script's location
-# BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # backend/app -> backend -> root
-# OUTPUT_DIR = os.path.join(BACKEND_DIR, "..", "frontend", "public", "rendered_images")
-# Simplified relative path assuming execution from workspace root or backend/ directory
-OUTPUT_DIR = "../frontend/public/rendered_images"
-# 建立目錄的操作可以在應用程式啟動時或首次使用前執行
-# os.makedirs(OUTPUT_DIR, exist_ok=True) # 移到 lifespan 或使用時檢查
+# 舊版路徑設定 (儲存在前端目錄)
+# OUTPUT_DIR = "../frontend/public/rendered_images"
 
-# SCENE_ORIGINAL_IMAGE_PATH = os.path.join(OUTPUT_DIR, "scene_original.png") # Removed
+# 新版路徑設定 (儲存在後端專用靜態目錄)
+# 使用基於後端模組的絕對路徑，更穩定且不依賴執行位置
+BACKEND_DIR = os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__))
+)  # app/core -> app
+OUTPUT_DIR = os.path.join(BACKEND_DIR, "static", "images")
+# 建立目錄的操作會在應用程式啟動時執行
+# os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# 圖片檔案路徑
 SCENE_WITH_PATHS_IMAGE_PATH = os.path.join(OUTPUT_DIR, "scene_with_paths.png")
 CONSTELLATION_IMAGE_PATH = os.path.join(OUTPUT_DIR, "constellation_diagram.png")
 EMPTY_SCENE_IMAGE_PATH = os.path.join(OUTPUT_DIR, "empty_scene.png")

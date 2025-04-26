@@ -7,6 +7,7 @@ import os
 # Import lifespan manager and API router from their new locations
 from app.db.lifespan import lifespan
 from app.api.v1.router import api_router
+from app.core.config import OUTPUT_DIR  # 導入設定的圖片目錄路徑
 
 logger = logging.getLogger(__name__)
 
@@ -19,25 +20,13 @@ app = FastAPI(
 )
 
 # --- Static Files Mount ---
-# 獲取 backend 目錄的絕對路徑
-backend_dir = os.path.dirname(os.path.abspath(__file__))
-# 構建相對於 backend 目錄的靜態文件夾路徑
-static_files_dir = os.path.join(
-    backend_dir, "..", "frontend", "public", "rendered_images"
-)
+# 確保靜態文件目錄存在
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+logger.info(f"Static files directory set to: {OUTPUT_DIR}")
 
-# 檢查目錄是否存在，如果不存在則建立 (雖然 lifespan 中可能已經建立，但這裡多一層保障)
-os.makedirs(static_files_dir, exist_ok=True)
-logger.info(f"Static files directory set to: {static_files_dir}")
-
-# 掛載靜態文件目錄到 /rendered_images URL 路徑
-# 注意：name="static" 只是 FastAPI 內部的名稱，URL 路徑由第一個參數決定
-app.mount(
-    "/rendered_images", StaticFiles(directory=static_files_dir), name="rendered_images"
-)
-logger.info(
-    f"Mounted static files directory '{static_files_dir}' at '/rendered_images'."
-)
+# 掛載靜態文件目錄到 /rendered_images URL 路徑 (保持與前端組件兼容的 URL)
+app.mount("/rendered_images", StaticFiles(directory=OUTPUT_DIR), name="rendered_images")
+logger.info(f"Mounted static files directory '{OUTPUT_DIR}' at '/rendered_images'.")
 
 # --- CORS Middleware ---
 # 允許特定域名的跨域請求，包括生產環境中的IP地址
