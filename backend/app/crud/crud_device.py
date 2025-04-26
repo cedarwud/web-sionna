@@ -45,10 +45,14 @@ async def create_device(db: AsyncSession, *, obj_in: DeviceCreate) -> Device:
 
         # 2. 根據設備類型創建對應的記錄
         if obj_in.device_type == DeviceType.TRANSMITTER:
-            # 默認創建 SIGNAL 類型的發射器
-            db_transmitter = Transmitter(
-                id=db_device.id, transmitter_type=TransmitterType.SIGNAL
+            # 檢查是否提供了transmitter_type，如果有就使用它，否則默認為SIGNAL
+            tx_type = (
+                obj_in.transmitter_type
+                if hasattr(obj_in, "transmitter_type") and obj_in.transmitter_type
+                else TransmitterType.SIGNAL
             )
+
+            db_transmitter = Transmitter(id=db_device.id, transmitter_type=tx_type)
             db.add(db_transmitter)
         elif obj_in.device_type == DeviceType.RECEIVER:
             # 創建接收器
@@ -217,11 +221,69 @@ async def update_device(
     else:
         update_data = obj_in.dict(exclude_unset=True)
 
+    # 提取transmitter_type以便稍後使用
+    transmitter_type = (
+        update_data.pop("transmitter_type", None)
+        if "transmitter_type" in update_data
+        else None
+    )
+
+    # 檢查是否變更了設備類型
+    device_type_changed = (
+        "device_type" in update_data
+        and update_data["device_type"] != db_obj.device_type
+    )
+
     # 更新 Device 物件
     for field, value in update_data.items():
         setattr(db_obj, field, value)
 
     db.add(db_obj)
+    await db.flush()
+
+    # 處理設備類型變更
+    if device_type_changed:
+        # 如果從非發射器變更為發射器
+        if db_obj.device_type == DeviceType.TRANSMITTER:
+            # 檢查是否已經有發射器記錄
+            if hasattr(db_obj, "transmitter") and db_obj.transmitter is not None:
+                # 更新現有發射器記錄的類型
+                if transmitter_type is not None:
+                    db_obj.transmitter.transmitter_type = transmitter_type
+            else:
+                # 創建新的發射器記錄
+                tx_type = (
+                    transmitter_type
+                    if transmitter_type is not None
+                    else TransmitterType.SIGNAL
+                )
+                db_transmitter = Transmitter(id=db_obj.id, transmitter_type=tx_type)
+                db.add(db_transmitter)
+
+        # 如果從發射器變更為接收器
+        elif db_obj.device_type == DeviceType.RECEIVER:
+            # 刪除現有的發射器記錄（如果有）
+            if hasattr(db_obj, "transmitter") and db_obj.transmitter is not None:
+                await db.delete(db_obj.transmitter)
+
+            # 檢查是否已經有接收器記錄
+            if not (hasattr(db_obj, "receiver") and db_obj.receiver is not None):
+                # 創建新的接收器記錄
+                db_receiver = Receiver(id=db_obj.id)
+                db.add(db_receiver)
+
+    # 處理發射器類型變更（當設備類型沒變，但發射器類型變了）
+    elif db_obj.device_type == DeviceType.TRANSMITTER and transmitter_type is not None:
+        # 確保發射器記錄存在
+        if hasattr(db_obj, "transmitter") and db_obj.transmitter is not None:
+            db_obj.transmitter.transmitter_type = transmitter_type
+        else:
+            # 如果沒有，創建一個
+            db_transmitter = Transmitter(
+                id=db_obj.id, transmitter_type=transmitter_type
+            )
+            db.add(db_transmitter)
+
     await db.commit()
     await db.refresh(db_obj)
     logger.info(f"Successfully updated device ID: {db_obj.id}")

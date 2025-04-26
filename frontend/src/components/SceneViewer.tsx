@@ -25,29 +25,29 @@ const SceneViewer: React.FC<SceneViewerProps> = () => {
     const [manualRetryMode, setManualRetryMode] = useState<boolean>(false)
 
     // 檢查空場景圖片是否存在，如果不存在則生成
-    useEffect(() => {
-        const checkEmptyScene = async () => {
-            try {
-                console.log('檢查空場景圖片是否存在...')
-                const response = await fetch('/api/v1/sionna/check-empty-scene')
+    // useEffect(() => {
+    //     const checkEmptyScene = async () => {
+    //         try {
+    //             console.log('檢查空場景圖片是否存在...')
+    //             const response = await fetch('/api/v1/sionna/check-empty-scene')
 
-                if (response.ok) {
-                    const data = await response.json()
-                    console.log('空場景檢查結果:', data)
-                    setLoadingPlaceholder(data.path)
-                } else {
-                    console.error('檢查空場景圖片失敗:', response.statusText)
-                    // 如果檢查失敗，使用默認的備用圖片
-                    setLoadingPlaceholder(FALLBACK_IMAGE_PATH)
-                }
-            } catch (error) {
-                console.error('檢查空場景圖片出錯:', error)
-                setLoadingPlaceholder(FALLBACK_IMAGE_PATH)
-            }
-        }
+    //             if (response.ok) {
+    //                 const data = await response.json()
+    //                 console.log('空場景檢查結果:', data)
+    //                 setLoadingPlaceholder(data.path)
+    //             } else {
+    //                 console.error('檢查空場景圖片失敗:', response.statusText)
+    //                 // 如果檢查失敗，使用默認的備用圖片
+    //                 setLoadingPlaceholder(FALLBACK_IMAGE_PATH)
+    //             }
+    //         } catch (error) {
+    //             console.error('檢查空場景圖片出錯:', error)
+    //             setLoadingPlaceholder(FALLBACK_IMAGE_PATH)
+    //         }
+    //     }
 
-        checkEmptyScene()
-    }, [])
+    //     checkEmptyScene()
+    // }, [])
 
     // 包裝 fetchImage 函數為可獨立調用的函數
     const fetchImage = async () => {
@@ -77,10 +77,16 @@ const SceneViewer: React.FC<SceneViewerProps> = () => {
         try {
             // 使用 fetch API 進行請求，添加超時處理
             const controller = new AbortController()
-            const timeoutId = setTimeout(() => controller.abort(), 10000) // 10秒超時
+            const timeoutId = setTimeout(() => controller.abort(), 15000) // 增加超時到15秒
 
             const response = await fetch(endpointWithCacheBuster, {
                 signal: controller.signal,
+                // 添加額外的請求選項，避免快取問題
+                cache: 'no-cache',
+                headers: {
+                    Pragma: 'no-cache',
+                    'Cache-Control': 'no-cache',
+                },
             })
             clearTimeout(timeoutId)
 
@@ -96,33 +102,82 @@ const SceneViewer: React.FC<SceneViewerProps> = () => {
                 throw new Error(errorDetail)
             }
 
-            // 假設後端直接返回圖片 blob
-            const imageBlob = await response.blob()
+            // 使用嘗試-捕獲塊來處理響應內容
+            try {
+                // 假設後端直接返回圖片 blob
+                const imageBlob = await response.blob()
 
-            // 檢查 blob 是否有效 (例如，大小 > 0)
-            if (imageBlob.size === 0) {
-                throw new Error('Received empty image blob.')
+                // 檢查 blob 是否有效 (例如，大小 > 0)
+                if (imageBlob.size === 0) {
+                    throw new Error('Received empty image blob.')
+                }
+
+                const newImageUrl = URL.createObjectURL(imageBlob)
+                console.log('Created new object URL:', newImageUrl)
+                setImageUrl(newImageUrl) // 設定新的圖片 URL
+                setPrevImageUrl(newImageUrl) // 儲存這次的 URL 以便下次清理
+                setRetryCount(0) // 重置重試計數
+                setManualRetryMode(false) // 重置手動重試模式
+            } catch (blobError) {
+                console.error('Error processing image blob:', blobError)
+                throw new Error(
+                    `處理圖像時出錯: ${
+                        blobError instanceof Error
+                            ? blobError.message
+                            : String(blobError)
+                    }`
+                )
             }
-
-            const newImageUrl = URL.createObjectURL(imageBlob)
-            console.log('Created new object URL:', newImageUrl)
-            setImageUrl(newImageUrl) // 設定新的圖片 URL
-            setPrevImageUrl(newImageUrl) // 儲存這次的 URL 以便下次清理
-            setRetryCount(0) // 重置重試計數
-            setManualRetryMode(false) // 重置手動重試模式
         } catch (error) {
             console.error(`Failed to fetch image from ${rtEndpoint}:`, error)
 
-            // 使用備用圖像
-            setImageUrl(FALLBACK_IMAGE_PATH)
-            setUsingFallback(true)
+            // 嘗試使用備用圖像 - 但改為通過 fetch API 載入，而不是直接使用路徑
+            try {
+                console.log('Trying to fetch fallback image as blob...')
+                const fallbackResponse = await fetch(FALLBACK_IMAGE_PATH, {
+                    cache: 'no-cache',
+                    headers: {
+                        Pragma: 'no-cache',
+                        'Cache-Control': 'no-cache',
+                    },
+                })
 
-            // 設置更有幫助的錯誤訊息
-            setError(
-                `圖像載入失敗: ${
-                    error instanceof Error ? error.message : '未知錯誤'
-                }`
-            )
+                if (fallbackResponse.ok) {
+                    const fallbackBlob = await fallbackResponse.blob()
+                    if (fallbackBlob.size > 0) {
+                        const fallbackUrl = URL.createObjectURL(fallbackBlob)
+                        setImageUrl(fallbackUrl)
+                        setPrevImageUrl(fallbackUrl)
+                        setUsingFallback(true)
+                        setError(
+                            `使用備用圖像: ${
+                                error instanceof Error
+                                    ? error.message
+                                    : '未知錯誤'
+                            }`
+                        )
+                        console.log(
+                            'Successfully loaded fallback image as blob'
+                        )
+                    } else {
+                        throw new Error('備用圖像 blob 為空')
+                    }
+                } else {
+                    throw new Error(
+                        `備用圖像請求失敗: ${fallbackResponse.status}`
+                    )
+                }
+            } catch (fallbackError) {
+                console.error('Fallback image loading failed:', fallbackError)
+                // 最後的備用：使用直接 URL (可能會導致 404 或內容長度問題，但至少我們嘗試了)
+                setImageUrl(FALLBACK_IMAGE_PATH)
+                setUsingFallback(true)
+                setError(
+                    `圖像載入失敗: ${
+                        error instanceof Error ? error.message : '未知錯誤'
+                    }`
+                )
+            }
 
             // 增加重試計數
             setRetryCount((prev) => prev + 1)
@@ -131,12 +186,12 @@ const SceneViewer: React.FC<SceneViewerProps> = () => {
             if (retryCount >= 2) {
                 setManualRetryMode(true)
             } else {
-                // 否則自動重試一次
+                // 否則自動重試一次，但延長間隔
                 console.log(`自動重試 (${retryCount + 1}/3)...`)
-                // 設定較短的重試間隔
+                // 設定較長的重試間隔
                 setTimeout(() => {
                     fetchImage()
-                }, 3000)
+                }, 5000) // 增加到5秒
             }
         } finally {
             setIsLoading(false)

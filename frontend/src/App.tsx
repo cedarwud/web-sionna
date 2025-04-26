@@ -198,8 +198,42 @@ function App() {
                 }
 
                 console.log('調用 API 創建設備，數據:', backendData)
-                await createDevice(backendData)
-                console.log('新設備創建成功')
+                try {
+                    await createDevice(backendData)
+                    console.log('新設備創建成功')
+                } catch (error: any) {
+                    // 詳細記錄錯誤
+                    console.error(
+                        '創建設備錯誤詳情:',
+                        error.response?.data || error.message
+                    )
+
+                    // 處理422錯誤的詳細信息
+                    let errorDetail = '未知錯誤'
+                    if (error.response?.data?.detail) {
+                        if (Array.isArray(error.response.data.detail)) {
+                            // 422錯誤通常會返回一個詳細信息數組
+                            errorDetail = error.response.data.detail
+                                .map((item: any) => {
+                                    if (item.msg && item.loc) {
+                                        return `${item.msg} at ${item.loc.join(
+                                            '.'
+                                        )}`
+                                    }
+                                    return JSON.stringify(item)
+                                })
+                                .join('; ')
+                        } else {
+                            errorDetail = error.response.data.detail
+                        }
+                    } else {
+                        errorDetail = error.message || '未知錯誤'
+                    }
+
+                    throw new Error(
+                        `創建設備 "${device.name}" 失敗: ${errorDetail}`
+                    )
+                }
             }
 
             // 然後更新已有設備
@@ -215,13 +249,46 @@ function App() {
                     z: device.z,
                     active: device.active,
                     device_type: deviceType,
-                    // 確保傳遞 transmitter_type，即使是 undefined
                     transmitter_type: transmitterType,
                 }
 
                 console.log(`正在更新設備 ID: ${device.id}，數據:`, backendData)
-                await updateDevice(device.id, backendData) // 調用後端修改 API
-                console.log(`設備 ID: ${device.id} 更新成功`)
+                try {
+                    await updateDevice(device.id, backendData) // 調用後端修改 API
+                    console.log(`設備 ID: ${device.id} 更新成功`)
+                } catch (error: any) {
+                    // 詳細記錄錯誤
+                    console.error(
+                        `更新設備錯誤詳情:`,
+                        error.response?.data || error.message
+                    )
+
+                    // 處理422錯誤的詳細信息
+                    let errorDetail = '未知錯誤'
+                    if (error.response?.data?.detail) {
+                        if (Array.isArray(error.response.data.detail)) {
+                            // 422錯誤通常會返回一個詳細信息數組
+                            errorDetail = error.response.data.detail
+                                .map((item: any) => {
+                                    if (item.msg && item.loc) {
+                                        return `${item.msg} at ${item.loc.join(
+                                            '.'
+                                        )}`
+                                    }
+                                    return JSON.stringify(item)
+                                })
+                                .join('; ')
+                        } else {
+                            errorDetail = error.response.data.detail
+                        }
+                    } else {
+                        errorDetail = error.message || '未知錯誤'
+                    }
+
+                    throw new Error(
+                        `更新設備 ID: ${device.id} 失敗: ${errorDetail}`
+                    )
+                }
             }
 
             // 所有更改完成後，重新獲取設備列表
@@ -263,11 +330,75 @@ function App() {
         field: keyof Device,
         value: any
     ) => {
-        setTempDevices((prev) =>
-            prev.map((device) =>
+        setTempDevices((prev) => {
+            // 如果修改的是設備類型，可能需要同時修改名稱
+            if (field === 'type') {
+                const deviceToUpdate = prev.find((d) => d.id === id)
+                if (deviceToUpdate) {
+                    // 獲取當前設備名稱
+                    const currentName = deviceToUpdate.name
+                    // 檢查名稱是否使用默認前綴格式
+                    const isDefaultNamingFormat = /^(tx|rx|int)_\d+$/.test(
+                        currentName
+                    )
+
+                    if (isDefaultNamingFormat) {
+                        // 如果使用默認命名格式，則隨類型變更而更新名稱
+                        // 根據新類型生成前綴
+                        const getPrefix = (type: DeviceType) => {
+                            switch (type) {
+                                case 'tx':
+                                    return 'tx_'
+                                case 'rx':
+                                    return 'rx_'
+                                case 'int':
+                                    return 'int_'
+                                default:
+                                    return 'device_'
+                            }
+                        }
+                        const newPrefix = getPrefix(value as DeviceType)
+
+                        // 提取當前名稱中的數字部分
+                        const match = currentName.match(/_(\d+)$/)
+                        const numberPart = match ? match[1] : '1'
+
+                        // 組合新名稱
+                        const newName = `${newPrefix}${numberPart}`
+
+                        // 確保新名稱不與其他設備重複
+                        let uniqueName = newName
+                        let suffix = 1
+
+                        // 獲取除了當前設備外的所有設備名稱
+                        const otherNames = prev
+                            .filter((d) => d.id !== id)
+                            .map((d) => d.name)
+
+                        while (otherNames.includes(uniqueName)) {
+                            suffix++
+                            uniqueName = `${newPrefix}${suffix}`
+                        }
+
+                        // 同時更新類型和名稱
+                        return prev.map((device) =>
+                            device.id === id
+                                ? {
+                                      ...device,
+                                      [field]: value,
+                                      name: uniqueName,
+                                  }
+                                : device
+                        )
+                    }
+                }
+            }
+
+            // 常規更新邏輯
+            return prev.map((device) =>
                 device.id === id ? { ...device, [field]: value } : device
             )
-        )
+        })
 
         // 如果修改了現有設備，標記有臨時變更
         if (id > 0) {
@@ -331,20 +462,44 @@ function App() {
         // 產生一個負數 ID，用於標識臨時設備
         const tempId = -Math.floor(Math.random() * 1000000) - 1
 
-        // 計算現有的 tx 設備數量（只計算 type 為 'tx' 的設備，不包括 'int'）
-        const existingTxCount = tempDevices.filter(
-            (device) => device.type === 'tx'
-        ).length
+        // 根據選定的設備類型生成不同的名稱前綴
+        const getPrefix = (type: DeviceType = 'tx') => {
+            switch (type) {
+                case 'tx':
+                    return 'tx_'
+                case 'rx':
+                    return 'rx_'
+                case 'int':
+                    return 'int_'
+                default:
+                    return 'device_'
+            }
+        }
 
-        // 創建一個新的臨時設備，名稱格式為 "tx_編號"
+        // 獲取已存在的設備名稱列表，以確保不會重複
+        const existingNames = tempDevices.map((device) => device.name)
+
+        // 默認設備類型
+        const defaultType: DeviceType = 'tx'
+        const prefix = getPrefix(defaultType)
+
+        // 尋找一個可用的名稱（不在現有名稱列表中）
+        let index = 1
+        let newName = `${prefix}${index}`
+        while (existingNames.includes(newName)) {
+            index++
+            newName = `${prefix}${index}`
+        }
+
+        // 創建一個新的臨時設備
         const newDevice: Device = {
             id: tempId,
-            name: `tx_${existingTxCount + 1}`,
+            name: newName,
             x: 0,
             y: 0,
             z: 0,
             active: true,
-            type: 'tx', // 預設為 Tx
+            type: defaultType,
         }
 
         // 更新 tempDevices 狀態，添加新的臨時設備

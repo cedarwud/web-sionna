@@ -14,6 +14,8 @@ const ConstellationViewer: React.FC = () => {
     // 新增重試機制相關狀態
     const [retryCount, setRetryCount] = useState<number>(0)
     const [manualRetryMode, setManualRetryMode] = useState<boolean>(false)
+    // 存儲對象 URL 以便清理
+    const [prevImageUrl, setPrevImageUrl] = useState<string | null>(null)
 
     // 封裝 fetchImage 函數為可獨立調用的函數
     const fetchImage = async () => {
@@ -22,14 +24,27 @@ const ConstellationViewer: React.FC = () => {
         setUsingFallback(false)
         console.log(`正在從 ${CONSTELLATION_ENDPOINT} 獲取星座圖...`)
 
+        // 清理上一個對象 URL（如果存在）
+        if (prevImageUrl) {
+            URL.revokeObjectURL(prevImageUrl)
+            setPrevImageUrl(null)
+            console.log('Revoked previous object URL:', prevImageUrl)
+        }
+
         try {
             // 使用 fetch API 進行請求，添加超時處理
             const controller = new AbortController()
-            const timeoutId = setTimeout(() => controller.abort(), 10000) // 10秒超時
+            const timeoutId = setTimeout(() => controller.abort(), 15000) // 增加到15秒超時
 
             const endpointWithCacheBuster = `${CONSTELLATION_ENDPOINT}?t=${new Date().getTime()}`
             const response = await fetch(endpointWithCacheBuster, {
                 signal: controller.signal,
+                // 添加額外請求選項，避免快取問題
+                cache: 'no-cache',
+                headers: {
+                    Pragma: 'no-cache',
+                    'Cache-Control': 'no-cache',
+                },
             })
             clearTimeout(timeoutId)
 
@@ -37,25 +52,90 @@ const ConstellationViewer: React.FC = () => {
                 throw new Error(`HTTP error! status: ${response.status}`)
             }
 
-            // 直接設置圖像URL
-            setImageUrl(endpointWithCacheBuster)
-            // 重置重試計數和模式
-            setRetryCount(0)
-            setManualRetryMode(false)
+            // 使用嘗試-捕獲塊來處理響應內容
+            try {
+                // 獲取 blob 而不是使用直接 URL
+                const imageBlob = await response.blob()
+
+                // 檢查 blob 大小
+                if (imageBlob.size === 0) {
+                    throw new Error('接收到空的圖像 blob')
+                }
+
+                // 創建 blob URL
+                const newImageUrl = URL.createObjectURL(imageBlob)
+                console.log('Created constellation diagram URL:', newImageUrl)
+                setImageUrl(newImageUrl)
+                setPrevImageUrl(newImageUrl)
+
+                // 重置重試計數和模式
+                setRetryCount(0)
+                setManualRetryMode(false)
+            } catch (blobError) {
+                console.error('Error processing image blob:', blobError)
+                throw new Error(
+                    `處理星座圖時出錯: ${
+                        blobError instanceof Error
+                            ? blobError.message
+                            : String(blobError)
+                    }`
+                )
+            }
         } catch (error) {
             console.error('星座圖載入失敗:', error)
-            console.log('使用備用星座圖:', FALLBACK_IMAGE_PATH)
 
-            // 使用備用圖像
-            setImageUrl(FALLBACK_IMAGE_PATH)
-            setUsingFallback(true)
+            // 嘗試使用備用圖像 - 通過 fetch API 載入
+            try {
+                console.log(
+                    'Trying to fetch fallback constellation image as blob...'
+                )
+                const fallbackResponse = await fetch(FALLBACK_IMAGE_PATH, {
+                    cache: 'no-cache',
+                    headers: {
+                        Pragma: 'no-cache',
+                        'Cache-Control': 'no-cache',
+                    },
+                })
 
-            // 設置更有幫助的錯誤訊息
-            setError(
-                `星座圖載入失敗: ${
-                    error instanceof Error ? error.message : '未知錯誤'
-                }`
-            )
+                if (fallbackResponse.ok) {
+                    const fallbackBlob = await fallbackResponse.blob()
+                    if (fallbackBlob.size > 0) {
+                        const fallbackUrl = URL.createObjectURL(fallbackBlob)
+                        setImageUrl(fallbackUrl)
+                        setPrevImageUrl(fallbackUrl)
+                        setUsingFallback(true)
+                        setError(
+                            `使用備用星座圖: ${
+                                error instanceof Error
+                                    ? error.message
+                                    : '未知錯誤'
+                            }`
+                        )
+                        console.log(
+                            'Successfully loaded fallback constellation image as blob'
+                        )
+                    } else {
+                        throw new Error('備用星座圖 blob 為空')
+                    }
+                } else {
+                    throw new Error(
+                        `備用星座圖請求失敗: ${fallbackResponse.status}`
+                    )
+                }
+            } catch (fallbackError) {
+                console.error(
+                    'Fallback constellation image loading failed:',
+                    fallbackError
+                )
+                // 最後的備用：使用直接 URL
+                setImageUrl(FALLBACK_IMAGE_PATH)
+                setUsingFallback(true)
+                setError(
+                    `星座圖載入失敗: ${
+                        error instanceof Error ? error.message : '未知錯誤'
+                    }`
+                )
+            }
 
             // 增加重試計數
             setRetryCount((prev) => prev + 1)
@@ -64,12 +144,12 @@ const ConstellationViewer: React.FC = () => {
             if (retryCount >= 2) {
                 setManualRetryMode(true)
             } else {
-                // 否則自動重試一次
+                // 否則自動重試一次，但延長間隔
                 console.log(`自動重試 (${retryCount + 1}/3)...`)
-                // 設定較短的重試間隔
+                // 設定較長的重試間隔
                 setTimeout(() => {
                     fetchImage()
-                }, 3000)
+                }, 5000) // 增加到5秒
             }
         } finally {
             setIsLoading(false)
@@ -79,9 +159,15 @@ const ConstellationViewer: React.FC = () => {
     // 主效果 - 初始載入
     useEffect(() => {
         fetchImage()
-        // 清理工作（如果需要）
+        // 清理工作
         return () => {
-            // 這裡可以添加需要的清理邏輯
+            if (prevImageUrl) {
+                URL.revokeObjectURL(prevImageUrl)
+                console.log(
+                    'Cleaned up constellation object URL on unmount:',
+                    prevImageUrl
+                )
+            }
         }
     }, []) // 空依賴陣列，僅在掛載時執行一次
 
@@ -109,11 +195,11 @@ const ConstellationViewer: React.FC = () => {
         if (usingFallback || imageUrl === FALLBACK_IMAGE_PATH) {
             setError(`備用星座圖也無法載入，請檢查網絡連接`)
         } else {
-            // 嘗試使用備用圖像
+            // 嘗試使用備用圖像 (這是 img 元素的錯誤處理，可能是 blob URL 有問題)
             console.log('常規星座圖失敗，嘗試備用圖:', FALLBACK_IMAGE_PATH)
             setImageUrl(FALLBACK_IMAGE_PATH)
             setUsingFallback(true)
-            setError(`使用最後一次成功的星座圖 (無法連接後端服務)`)
+            setError(`使用最後一次成功的星座圖 (圖像渲染失敗)`)
         }
 
         setIsLoading(false) // 確保 loading 結束
@@ -151,6 +237,7 @@ const ConstellationViewer: React.FC = () => {
             )}
             {imageUrl && (
                 <img
+                    key={imageUrl} // 使用 key 確保 URL 變化時 img 元素刷新
                     src={imageUrl}
                     alt="Constellation Diagram"
                     onLoad={handleImageLoad}
