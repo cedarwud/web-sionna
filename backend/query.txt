@@ -1,0 +1,15 @@
+SELECT 
+    d.id, 
+    d.name, 
+    d.device_type,
+    d.x, 
+    d.y, 
+    d.z,
+    d.active,
+    t.transmitter_type
+FROM 
+    device d
+LEFT JOIN 
+    transmitter t ON d.id = t.id
+ORDER BY 
+    d.id;

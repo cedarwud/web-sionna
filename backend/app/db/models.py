@@ -1,6 +1,5 @@
 from typing import Optional, Any
 from sqlmodel import Field, SQLModel, Relationship # Relationship 如果有用到關聯
-from geoalchemy2 import Geometry # For PostGIS geometry types
 from enum import Enum as PyEnum
 
 # --- Enum Definitions ---
@@ -12,19 +11,14 @@ class TransmitterType(PyEnum):
     SIGNAL = "signal"
     INTERFERER = "interferer"
 
-# --- Geometry Type Definition ---
-# 使用 WGS 84 SRID (EPSG:4326)
-# POINTZ for 3D coordinates (x, y, z)
-# spatial_index=True 建議加上以利空間查詢效能
-GEOMETRY_TYPE = Geometry(geometry_type='POINTZ', srid=4326, spatial_index=True)
-
-
 # --- SQLModel Definitions ---
 
 class DeviceBase(SQLModel):
     name: str = Field(index=True, unique=True)
     device_type: DeviceType
-    position: Optional[str] = Field(default=None, sa_column=GEOMETRY_TYPE)
+    x: float = Field(default=0.0)  # 經度 (longitude)
+    y: float = Field(default=0.0)  # 緯度 (latitude)
+    z: float = Field(default=0.0)  # 高度 (altitude)
     active: bool = Field(default=True, index=True) # 加入 active 欄位
 
 # Represents the table structure, inherits validation from DeviceBase

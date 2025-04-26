@@ -31,29 +31,31 @@ async def seed_initial_data(session: AsyncSession):
         return
 
     logger.info("Seeding initial device data...")
-    # Define initial devices
-    # Note: ST_MakePointZ might need casting, ST_GeomFromText is often safer cross-platform
-    # Using ST_GeomFromText as in the previous SQL example
-    from geoalchemy2.functions import ST_GeomFromText
 
     try:
-        # Create base devices first
+        # Create base devices first with x, y, z coordinates
         tx_main_dev = Device(
             name="tx_main",
             device_type=DeviceType.TRANSMITTER,
-            position=ST_GeomFromText('POINT Z (0 60 2)', 4326),
+            x=0.0,   # longitude
+            y=60.0,  # latitude
+            z=2.0,   # altitude
             active=True
         )
         tx_i_dev = Device(
             name="tx_i",
             device_type=DeviceType.TRANSMITTER,
-            position=ST_GeomFromText('POINT Z (-100 100 2)', 4326),
+            x=-100.0,
+            y=100.0,
+            z=2.0,
             active=True
         )
         rx_dev = Device(
             name="rx",
             device_type=DeviceType.RECEIVER,
-            position=ST_GeomFromText('POINT Z (0 0 1.5)', 4326),
+            x=0.0,
+            y=0.0,
+            z=1.5,
             active=True
         )
         session.add_all([tx_main_dev, tx_i_dev, rx_dev])

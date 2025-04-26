@@ -12,12 +12,12 @@ from sionna.rt import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
-from geoalchemy2.functions import ST_AsText
 import collections.abc # Import for checking iterable
 
 # Import models and config from their new locations
 from app.db.models import Device, Transmitter, Receiver, DeviceType, TransmitterType
 from app.core.config import OUTPUT_DIR
+from app.crud import crud_device # 導入整合後的 crud_device 模塊
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 class DeviceData(BaseModel):
     """用於傳遞設備模型和其處理後的位置列表"""
     device_model: Device = PydanticField(...) # Store the original SQLModel object
-    position_list: Optional[List[float]] = None # Store the parsed position list
+    position_list: List[float] = None # Store the position as a list [x, y, z]
     transmitter_type: Optional[TransmitterType] = None # Store transmitter type if applicable
 
     class Config:
@@ -44,40 +44,102 @@ def add_to_scene_safe(scene, device):
         logger.warning(f"Device '{device.name}' might already exist in the scene.")
         pass
 
-# --- Database Device Fetching (Corrected) ---
+# --- Database Device Fetching (Updated for x, y, z coordinates) ---
 async def get_active_devices_from_db(session: AsyncSession) -> tuple[List[DeviceData], List[DeviceData]]:
-    # (保持不變)
     """獲取活動的發射器和接收器設備資料 (包含解析後的位置)"""
     logger.info("Fetching active devices from database...")
-    stmt = select(Device, ST_AsText(Device.position).label('position_wkt')).where(Device.active == True)
-    result = await session.execute(stmt)
-    all_active_devices_db = result.all()
-    active_tx_ids = [dev.id for dev, wkt in all_active_devices_db if dev.device_type == DeviceType.TRANSMITTER and dev.id is not None]
+    
+    # 使用整合後的 crud_device 中的 get_active_devices_by_type 函數
+    transmitters, receivers = await crud_device.get_active_devices_by_type(db=session)
+    
+    # 獲取發射器類型信息
+    active_tx_ids = [tx.id for tx in transmitters if tx.id is not None]
     tx_type_map = {}
     if active_tx_ids:
         tx_type_stmt = select(Transmitter).where(Transmitter.id.in_(active_tx_ids))
         tx_type_result = await session.execute(tx_type_stmt)
         tx_type_map = {tx.id: tx.transmitter_type for tx in tx_type_result.scalars().all()}
+    
+    # 處理發射器數據
     transmitters_data: List[DeviceData] = []
+    for dev_model in transmitters:
+        pos_list = [dev_model.x, dev_model.y, dev_model.z]
+        device_data = DeviceData(
+            device_model=dev_model, 
+            position_list=pos_list,
+            transmitter_type=tx_type_map.get(dev_model.id)
+        )
+        transmitters_data.append(device_data)
+        logger.info(f"Processed Active Transmitter: {dev_model.name}, Type: {device_data.transmitter_type}, Position: {pos_list}")
+    
+    # 處理接收器數據
     receivers_data: List[DeviceData] = []
-    for dev_model, pos_wkt in all_active_devices_db:
-        pos_list: Optional[List[float]] = None
-        try:
-            if pos_wkt:
-                 coords_str = pos_wkt.replace('POINT Z (', '').replace(')', '').split()
-                 pos_list = [float(c) for c in coords_str]
-            else:
-                 logger.warning(f"Device '{dev_model.name}' has NULL position.")
-        except Exception as e:
-             logger.error(f"Error parsing WKT '{pos_wkt}' for device {dev_model.name}: {e}", exc_info=True)
+    for dev_model in receivers:
+        pos_list = [dev_model.x, dev_model.y, dev_model.z]
         device_data = DeviceData(device_model=dev_model, position_list=pos_list)
-        if dev_model.device_type == DeviceType.TRANSMITTER:
-            device_data.transmitter_type = tx_type_map.get(dev_model.id)
-            transmitters_data.append(device_data)
-            logger.info(f"Processed Active Transmitter: {dev_model.name}, Type: {device_data.transmitter_type}, Position: {pos_list}")
-        elif dev_model.device_type == DeviceType.RECEIVER:
-            receivers_data.append(device_data)
-            logger.info(f"Processed Active Receiver: {dev_model.name}, Position: {pos_list}")
+        receivers_data.append(device_data)
+        logger.info(f"Processed Active Receiver: {dev_model.name}, Position: {pos_list}")
+    
+    return transmitters_data, receivers_data
+
+# --- 更高效率版本的 get_active_devices_from_db 函數 ---
+async def get_active_devices_from_db_efficient(session: AsyncSession) -> tuple[List[DeviceData], List[DeviceData]]:
+    """獲取活動的發射器和接收器設備資料 (使用單次查詢，效率更高)"""
+    logger.info("Fetching active devices from database (efficient version)...")
+    
+    # 為特定需求獲取發射器
+    signal_txs = await crud_device.get_transmitters_by_type(
+        db=session, 
+        transmitter_type=TransmitterType.SIGNAL, 
+        active_only=True
+    )
+    interferer_txs = await crud_device.get_transmitters_by_type(
+        db=session, 
+        transmitter_type=TransmitterType.INTERFERER, 
+        active_only=True
+    )
+    
+    # 獲取接收器
+    receivers_query = select(Device).where(
+        Device.active == True, 
+        Device.device_type == DeviceType.RECEIVER
+    )
+    receivers_result = await session.execute(receivers_query)
+    receivers = receivers_result.scalars().all()
+    
+    # 處理發射器數據
+    transmitters_data: List[DeviceData] = []
+    
+    # 處理信號發射器
+    for dev_model in signal_txs:
+        pos_list = [dev_model.x, dev_model.y, dev_model.z]
+        device_data = DeviceData(
+            device_model=dev_model, 
+            position_list=pos_list,
+            transmitter_type=TransmitterType.SIGNAL
+        )
+        transmitters_data.append(device_data)
+        logger.info(f"Processed Active Signal Transmitter: {dev_model.name}, Position: {pos_list}")
+    
+    # 處理干擾源發射器
+    for dev_model in interferer_txs:
+        pos_list = [dev_model.x, dev_model.y, dev_model.z]
+        device_data = DeviceData(
+            device_model=dev_model, 
+            position_list=pos_list,
+            transmitter_type=TransmitterType.INTERFERER
+        )
+        transmitters_data.append(device_data)
+        logger.info(f"Processed Active Interferer: {dev_model.name}, Position: {pos_list}")
+    
+    # 處理接收器數據
+    receivers_data: List[DeviceData] = []
+    for dev_model in receivers:
+        pos_list = [dev_model.x, dev_model.y, dev_model.z]
+        device_data = DeviceData(device_model=dev_model, position_list=pos_list)
+        receivers_data.append(device_data)
+        logger.info(f"Processed Active Receiver: {dev_model.name}, Position: {pos_list}")
+    
     return transmitters_data, receivers_data
 
 
@@ -107,10 +169,10 @@ def generate_scene_original_image(output_path: str) -> bool:
 
 
 async def generate_scene_with_paths_image(output_path: str, session: AsyncSession) -> bool:
-    # (保持不變)
     logger.info("Entering generate_scene_with_paths_image function...")
     try:
-        transmitters_data, receivers_data = await get_active_devices_from_db(session)
+        # 使用更高效率的函數
+        transmitters_data, receivers_data = await get_active_devices_from_db_efficient(session)
         if not transmitters_data or not receivers_data: return False
         rx_data = receivers_data[0]
         if not rx_data.position_list: return False
@@ -164,7 +226,8 @@ async def generate_constellation_plot(
     logger.info("Entering generate_constellation_plot function...")
     try:
         # --- 1. Fetch Active Devices Data ---
-        transmitters_data, receivers_data = await get_active_devices_from_db(session)
+        # 使用更高效率的函數
+        transmitters_data, receivers_data = await get_active_devices_from_db_efficient(session)
         if not transmitters_data or not receivers_data:
             logger.error("No active transmitters or receivers data found for constellation plot.")
             return False
