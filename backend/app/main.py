@@ -17,21 +17,24 @@ app = FastAPI(
 )
 
 # --- CORS Middleware ---
-# Adjust origins as needed for your frontend setup
+# 允許特定域名的跨域請求，包括生產環境中的IP地址
 origins = [
     "http://localhost",
-    "http://localhost:5173", # Default Vite dev port
-    # Add any other origins if needed
+    "http://localhost:5173",  # 本地開發環境
+    "http://127.0.0.1:5173",
+    "http://120.126.151.101",
+    "http://120.126.151.101:5173",  # 生產環境 IP 地址
+    # 添加任何其他需要的域名
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, # Or ["*"] for development testing
+    allow_origins=origins,  # 使用明確的域名列表而不是 ["*"]
     allow_credentials=True,
-    allow_methods=["*"], # Allows all methods
-    allow_headers=["*"], # Allows all headers
+    allow_methods=["*"],  # 允許所有方法
+    allow_headers=["*"],  # 允許所有頭部
 )
-logger.info("CORS middleware added.")
+logger.info("CORS middleware added with specific origins.")
 
 # --- Include API Routers ---
 # Include the router for API version 1

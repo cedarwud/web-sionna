@@ -111,10 +111,12 @@ body {
   color: var(--dark-text);
   border: none;
   border-radius: 3px;
+  margin-right: 8px;
 }
 
 .button-group button:last-child {
   background-color: var(--dark-button-secondary);
+  margin-right: 0;
 }
 
 .scene-selector select {
@@ -298,4 +300,85 @@ body {
 .delete-btn:hover {
   opacity: 1;
   color: var(--dark-button-secondary);
+}
+
+/* 新增的CSS樣式 */
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-size: 1.5rem;
+  color: #333;
+}
+
+.error-message {
+  background-color: #ffebee;
+  color: #c62828;
+  padding: 8px 12px;
+  margin: 8px 0;
+  border-radius: 4px;
+  border-left: 4px solid #c62828;
+}
+
+.device-name-input {
+  background: none;
+  border: none;
+  border-bottom: 1px solid transparent;
+  font-size: 1rem;
+  font-weight: bold;
+  padding: 4px;
+  width: 70%;
+  outline: none;
+  transition: border-bottom-color 0.2s ease;
+}
+
+.device-name-input:hover, .device-name-input:focus {
+  border-bottom-color: #2196f3;
+}
+
+/* API 狀態顯示器 */
+.api-status {
+  margin: 10px 0;
+  padding: 8px;
+  border-radius: 4px;
+  background-color: var(--dark-accent);
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.status-indicator {
+  margin: 0 5px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-weight: bold;
+  font-size: 0.8rem;
+}
+
+.status-indicator.connected {
+  background-color: #388e3c;
+  color: white;
+}
+
+.status-indicator.disconnected {
+  background-color: #9e9e9e;
+  color: white;
+}
+
+.status-indicator.error {
+  background-color: #d32f2f;
+  color: white;
+}
+
+.status-warning {
+  font-size: 0.8rem;
+  color: #ffc107;
+  margin-left: 5px;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }

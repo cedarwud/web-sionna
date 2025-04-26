@@ -142,10 +142,11 @@ async def get_multi_devices(
 ) -> Sequence[Device]:
     """
     獲取設備列表，可選按類型過濾。
+    關聯的 Transmitter (如果存在) 會被自動加載 (lazy='joined')。
     """
     logger.debug(f"Fetching multiple devices (skip={skip}, limit={limit}, type={device_type})")
     
-    # 基本查詢
+    # 基礎查詢，依賴模型定義中的 lazy='joined' 來加載 Transmitter
     query = select(Device)
     
     # 如果指定了設備類型，添加類型過濾條件
@@ -156,7 +157,9 @@ async def get_multi_devices(
     query = query.offset(skip).limit(limit)
     
     result = await db.execute(query)
-    return result.scalars().all()
+    
+    # scalars().all() 應該會返回包含已加載關係的 Device 對象
+    return result.scalars().unique().all() # .unique() 防止 join 可能導致的重複
 
 # --- Get Multiple Interferers (整合自 crud_interferer) ---
 async def get_multi_interferers(
@@ -164,18 +167,22 @@ async def get_multi_interferers(
 ) -> Sequence[Device]:
     """
     獲取干擾源設備列表 (確保其類型正確)。
+    關聯的 Transmitter 會被自動加載 (lazy='joined')。
     """
     logger.debug(f"Fetching multiple interferers (skip={skip}, limit={limit})")
-    stmt = (
+    # 因為 Device 模型已經定義了 lazy='joined'，可以直接查詢 Device
+    # SQLAlchemy 會自動處理 join 和過濾
+    query = (
         select(Device)
-        .join(Transmitter, Device.id == Transmitter.id)
+        # .options(joinedload(Device.transmitter)) # 如果 lazy='joined' 不可靠，可以明確指定
+        .join(Device.transmitter) # 使用關係進行 join
         .where(Device.device_type == DeviceType.TRANSMITTER)
         .where(Transmitter.transmitter_type == TransmitterType.INTERFERER)
         .offset(skip)
         .limit(limit)
     )
-    result = await db.execute(stmt)
-    return result.scalars().all()
+    result = await db.execute(query)
+    return result.scalars().unique().all()
 
 # --- Update Device ---
 async def update_device(
@@ -262,11 +269,13 @@ async def get_transmitters_by_type(
 ) -> Sequence[Device]:
     """
     獲取特定類型的發射器設備列表。
+    關聯的 Transmitter 會被自動加載。
     """
     logger.debug(f"Fetching transmitters of type {transmitter_type} (skip={skip}, limit={limit}, active_only={active_only})")
     query = (
         select(Device)
-        .join(Transmitter, Device.id == Transmitter.id)
+        # .options(joinedload(Device.transmitter))
+        .join(Device.transmitter)
         .where(Device.device_type == DeviceType.TRANSMITTER)
         .where(Transmitter.transmitter_type == transmitter_type)
     )
@@ -277,7 +286,7 @@ async def get_transmitters_by_type(
     query = query.offset(skip).limit(limit)
     
     result = await db.execute(query)
-    return result.scalars().all()
+    return result.scalars().unique().all()
 
 async def get_active_devices_by_type(
     db: AsyncSession, *, 
@@ -287,38 +296,40 @@ async def get_active_devices_by_type(
     """
     獲取活動的發射器和接收器設備，可選按發射器類型過濾。
     返回 (transmitters, receivers) 元組。
+    Transmitter 會自動加載。
     """
     logger.debug(f"Fetching active devices by type (device_type={device_type}, transmitter_type={transmitter_type})")
     
-    # 獲取所有活動設備的基本查詢
-    base_query = select(Device).where(Device.active == True)
-    
-    # 獲取發射器
+    transmitters = []
+    receivers = []
+
+    # --- 獲取發射器 ---
     if device_type == DeviceType.TRANSMITTER or device_type is None:
-        tx_query = base_query.where(Device.device_type == DeviceType.TRANSMITTER)
+        # 查詢 Device，依賴 lazy='joined' 或 joinedload
+        tx_query = (
+            select(Device)
+            # .options(joinedload(Device.transmitter))
+            .join(Device.transmitter) # join 是必要的，即使 lazy='joined'，以便在 where 中過濾
+            .where(Device.active == True)
+            .where(Device.device_type == DeviceType.TRANSMITTER)
+        )
+        # 如果指定了發射器類型，添加過濾條件
+        if transmitter_type is not None:
+            tx_query = tx_query.where(Transmitter.transmitter_type == transmitter_type)
+            
         tx_result = await db.execute(tx_query)
-        transmitters = tx_result.scalars().all()
-        
-        # 如果指定了發射器類型，需要進一步過濾
-        if transmitter_type is not None and transmitters:
-            tx_ids = [tx.id for tx in transmitters]
-            tx_filter_query = (
-                select(Transmitter)
-                .where(Transmitter.id.in_(tx_ids))
-                .where(Transmitter.transmitter_type == transmitter_type)
-            )
-            tx_filter_result = await db.execute(tx_filter_query)
-            tx_ids_filtered = [tx.id for tx in tx_filter_result.scalars().all()]
-            transmitters = [tx for tx in transmitters if tx.id in tx_ids_filtered]
-    else:
-        transmitters = []
-    
-    # 獲取接收器
+        transmitters = list(tx_result.scalars().unique().all())
+
+    # --- 獲取接收器 ---
     if device_type == DeviceType.RECEIVER or device_type is None:
-        rx_query = base_query.where(Device.device_type == DeviceType.RECEIVER)
+        # 接收器不需要連接 Transmitter
+        rx_query = (
+            select(Device)
+            # .options(joinedload(Device.receiver)) # 如果需要加載 receiver 關係
+            .where(Device.active == True)
+            .where(Device.device_type == DeviceType.RECEIVER)
+        )
         rx_result = await db.execute(rx_query)
-        receivers = rx_result.scalars().all()
-    else:
-        receivers = []
+        receivers = list(rx_result.scalars().unique().all())
     
     return transmitters, receivers 
