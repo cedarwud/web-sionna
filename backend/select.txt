@@ -1,0 +1,15 @@
+SELECT
+    d.id,
+    d.name,
+    d.device_type,
+    d.active,
+    ST_AsText(d.position) AS position_wkt, -- 將 Geometry 轉為文字格式顯示
+    t.transmitter_type   -- 只對 transmitter 類型的 device 顯示此欄位
+FROM
+    device d
+LEFT JOIN
+    transmitter t ON d.id = t.id -- 左連接 transmitter 表
+LEFT JOIN
+    receiver r ON d.id = r.id   -- 左連接 receiver 表 (雖然 receiver 目前無額外欄位，但保持結構完整)
+ORDER BY
+    d.id; -- 按 ID 排序

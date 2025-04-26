@@ -59,6 +59,7 @@ try:
     from fastapi import FastAPI, Depends, HTTPException
     from fastapi.responses import FileResponse
     from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.staticfiles import StaticFiles  # 導入靜態文件服務
 
     print("FastAPI related imports successful.")
     import sionna.rt
@@ -393,8 +394,20 @@ def generate_constellation_plot(
 # --- FastAPI 應用程式實例 (保持不變) ---
 print("Creating FastAPI app instance...")
 app = FastAPI()
-# ... (CORS Middleware 設定保持不變) ...
+
+# 添加CORS設置
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 在生產環境中應該指定允許的源
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 print("CORS middleware added.")
+
+# 添加靜態文件服務，使渲染的圖像可以直接通過URL訪問
+app.mount("/rendered_images", StaticFiles(directory=OUTPUT_DIR), name="rendered_images")
+print(f"Static files mounted: /rendered_images -> {OUTPUT_DIR}")
 
 
 # --- API 端點 ---

@@ -1,0 +1,130 @@
+-- Ensure the PostGIS extension is available (often needed if not the default DB)
+-- CREATE EXTENSION IF NOT EXISTS postgis;
+
+-- Start a transaction
+BEGIN;
+
+-- =============================================
+--  1. Create Enum Types (if they don't exist)
+-- =============================================
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'devicetype') THEN
+        CREATE TYPE devicetype AS ENUM ('transmitter', 'receiver');
+    END IF;
+END$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'transmittertype') THEN
+        CREATE TYPE transmittertype AS ENUM ('signal', 'interferer');
+    END IF;
+END$$;
+
+
+-- =============================================
+--  2. Create Tables (with 'active' column)
+-- =============================================
+
+-- Drop tables if they exist (optional, useful for clean slate testing)
+-- DROP TABLE IF EXISTS receiver CASCADE;
+-- DROP TABLE IF EXISTS transmitter CASCADE;
+-- DROP TABLE IF EXISTS device CASCADE;
+
+-- Create the base 'device' table with the new 'active' column
+CREATE TABLE IF NOT EXISTS device (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR UNIQUE NOT NULL,
+    device_type devicetype NOT NULL,
+    -- PostGIS Geometry column for 3D points (X, Y, Z) using SRID 4326 (WGS 84)
+    position GEOMETRY(PointZ, 4326),
+    -- NEW: Boolean field to indicate if the device is active
+    active BOOLEAN NOT NULL DEFAULT TRUE -- Default to active
+);
+
+-- Add index on name for faster lookups
+CREATE INDEX IF NOT EXISTS ix_device_name ON device (name);
+-- Add spatial index on position for faster spatial queries
+CREATE INDEX IF NOT EXISTS ix_device_position ON device USING GIST (position);
+-- Add index on active status (optional, but can be useful)
+CREATE INDEX IF NOT EXISTS ix_device_active ON device (active);
+
+
+-- Create the 'transmitter' table, inheriting/linking from 'device'
+CREATE TABLE IF NOT EXISTS transmitter (
+    id INTEGER PRIMARY KEY REFERENCES device(id) ON DELETE CASCADE,
+    transmitter_type transmittertype NOT NULL DEFAULT 'signal'
+);
+
+-- Create the 'receiver' table, inheriting/linking from 'device'
+CREATE TABLE IF NOT EXISTS receiver (
+    id INTEGER PRIMARY KEY REFERENCES device(id) ON DELETE CASCADE
+);
+
+
+-- =============================================
+--  3. Insert Initial Data (Using ST_GeomFromText and 'active' field)
+-- =============================================
+
+-- Clear existing data before inserting (optional)
+-- TRUNCATE device RESTART IDENTITY CASCADE; -- Use this instead of individual truncates
+
+WITH inserted_tx_main AS (
+    INSERT INTO device (name, device_type, position, active)
+    VALUES (
+        'tx_main',
+        'transmitter',
+        -- Use ST_GeomFromText instead of ST_MakePointZ
+        ST_GeomFromText('POINT Z (0 60 2)', 4326),
+        TRUE -- Set initial active status
+    )
+    RETURNING id -- Get the generated ID
+),
+inserted_tx_i AS (
+    INSERT INTO device (name, device_type, position, active)
+    VALUES (
+        'tx_i',
+        'transmitter',
+        ST_GeomFromText('POINT Z (-100 100 2)', 4326),
+        TRUE -- Set initial active status
+    )
+    RETURNING id -- Get the generated ID
+),
+inserted_rx AS (
+    INSERT INTO device (name, device_type, position, active)
+    VALUES (
+        'rx',
+        'receiver',
+        ST_GeomFromText('POINT Z (0 0 1.5)', 4326),
+        TRUE -- Set initial active status
+    )
+    RETURNING id -- Get the generated ID
+),
+inserted_transmitter_main AS (
+    INSERT INTO transmitter (id, transmitter_type)
+    SELECT id, 'signal' FROM inserted_tx_main -- Use ID from inserted_tx_main
+),
+inserted_transmitter_i AS (
+    INSERT INTO transmitter (id, transmitter_type)
+    SELECT id, 'interferer' FROM inserted_tx_i -- Use ID from inserted_tx_i
+)
+-- Insert into receiver using the ID from inserted_rx
+INSERT INTO receiver (id)
+SELECT id FROM inserted_rx;
+
+
+-- Commit the transaction
+COMMIT;
+
+-- =============================================
+--  4. Verify Insertion (Optional)
+-- =============================================
+-- SELECT d.id, d.name, d.device_type, d.active, ST_AsText(d.position) as position_wkt, t.transmitter_type
+-- FROM device d
+-- LEFT JOIN transmitter t ON d.id = t.id
+-- WHERE d.device_type = 'transmitter';
+
+-- SELECT d.id, d.name, d.device_type, d.active, ST_AsText(d.position) as position_wkt
+-- FROM device d
+-- LEFT JOIN receiver r ON d.id = r.id
+-- WHERE d.device_type = 'receiver';
