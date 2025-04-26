@@ -4,6 +4,8 @@ services:
   db: # <-- 新增 PostgreSQL + PostGIS 服務
     image: postgis/postgis:16-3.4 # 建議指定明確的版本，例如 PostgreSQL 16 + PostGIS 3.4
     container_name: postgis_db # 給容器一個明確的名稱
+    env_file:
+      - ./.env # 從項目根目錄的 .env 讀取配置
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-user} # 從 .env 或預設值讀取
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password} # 從 .env 或預設值讀取
@@ -30,13 +32,14 @@ services:
     volumes:
       - ./backend:/app
     env_file:
-      - ./backend/.env # 加載 .env 文件
+      - ./.env # 從項目根目錄的 .env 讀取配置
+      - ./backend/.env # 同時也加載 backend/.env 文件
     environment:
       # 原有的環境變數
       CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-}
       # --- 新增：資料庫連接 URL ---
       # 使用 docker-compose 內部的服務名稱 'db'
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-appdb}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     deploy: # 如果需要 GPU 支持
       resources:
         reservations:
