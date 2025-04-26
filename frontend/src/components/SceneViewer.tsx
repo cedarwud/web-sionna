@@ -8,6 +8,7 @@ interface SceneViewerProps {
 
 // 定義靜態路徑指向後端存儲的最後一次成功渲染的圖像
 const FALLBACK_IMAGE_PATH = '/rendered_images/scene_with_paths.png'
+const EMPTY_SCENE_IMAGE_PATH = '/rendered_images/empty_scene.png'
 
 const SceneViewer: React.FC<SceneViewerProps> = () => {
     console.log('--- SceneViewer Component Rendered ---')
@@ -16,6 +17,34 @@ const SceneViewer: React.FC<SceneViewerProps> = () => {
     const [error, setError] = useState<string | null>(null)
     const [prevImageUrl, setPrevImageUrl] = useState<string | null>(null) // State to hold previous URL for cleanup
     const [usingFallback, setUsingFallback] = useState<boolean>(false)
+    const [loadingPlaceholder, setLoadingPlaceholder] = useState<string | null>(
+        null
+    )
+
+    // 檢查空場景圖片是否存在，如果不存在則生成
+    useEffect(() => {
+        const checkEmptyScene = async () => {
+            try {
+                console.log('檢查空場景圖片是否存在...')
+                const response = await fetch('/api/v1/sionna/check-empty-scene')
+
+                if (response.ok) {
+                    const data = await response.json()
+                    console.log('空場景檢查結果:', data)
+                    setLoadingPlaceholder(data.path)
+                } else {
+                    console.error('檢查空場景圖片失敗:', response.statusText)
+                    // 如果檢查失敗，使用默認的備用圖片
+                    setLoadingPlaceholder(FALLBACK_IMAGE_PATH)
+                }
+            } catch (error) {
+                console.error('檢查空場景圖片出錯:', error)
+                setLoadingPlaceholder(FALLBACK_IMAGE_PATH)
+            }
+        }
+
+        checkEmptyScene()
+    }, [])
 
     useEffect(() => {
         console.log('--- SceneViewer useEffect triggered ---')
@@ -35,8 +64,14 @@ const SceneViewer: React.FC<SceneViewerProps> = () => {
                 setPrevImageUrl(null) // 清理 state
                 console.log('Revoked previous object URL:', prevImageUrl)
             }
+
             // 清除當前顯示的圖像，避免切換時閃爍舊圖
-            setImageUrl(null)
+            // 如果存在空場景圖片，則在加載過程中顯示它
+            if (loadingPlaceholder) {
+                setImageUrl(loadingPlaceholder)
+            } else {
+                setImageUrl(null)
+            }
 
             const endpointWithCacheBuster = `${rtEndpoint}?t=${new Date().getTime()}`
             console.log(`Fetching image from: ${endpointWithCacheBuster}`)

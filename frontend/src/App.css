@@ -70,7 +70,7 @@ body {
 }
 
 .sidebar {
-  width: 350px;
+  width: 300px;
   background-color: var(--dark-accent);
   height: 100vh;
   overflow-y: auto;
@@ -95,7 +95,6 @@ body {
 
 .button-group {
   display: flex;
-  gap: 10px;
 }
 
 .button-group button,
@@ -112,6 +111,7 @@ body {
   border: none;
   border-radius: 3px;
   margin-right: 8px;
+  font-size: 0.8rem;
 }
 
 .button-group button:last-child {
@@ -182,7 +182,8 @@ body {
 .device-header .delete-btn {
   position: absolute;
   right: 0;
-  top: 0;
+  top: 38%;
+  transform: translateY(-50%);
 }
 
 .device-content {
@@ -207,7 +208,7 @@ body {
 
 .device-table th:nth-child(2),
 .device-table td:nth-child(2) {
-  width: 26%;
+  width: 20%;
 }
 
 .device-table th:nth-child(3),
@@ -216,7 +217,7 @@ body {
 .device-table td:nth-child(3),
 .device-table td:nth-child(4),
 .device-table td:nth-child(5) {
-  width: 20%;
+  width: 24%;
 }
 
 .device-table th:last-child,
@@ -268,7 +269,7 @@ body {
   height: 100%;
   background-color: var(--dark-bg);
   color: var(--dark-text);
-  margin-left: 350px; /* 與側邊欄寬度相同 */
+  margin-left: 300px; /* 與側邊欄寬度相同 */
 }
 
 /* 保留原有的 App 樣式並調整為暗色主題 */
@@ -322,15 +323,16 @@ body {
 }
 
 .device-name-input {
-  background: none;
-  border: none;
-  border-bottom: 1px solid transparent;
+  width: calc(100% - 50px); /* 留出空間給刪除按鈕 */
+  padding: 6px 8px;
+  background-color: var(--dark-input-bg);
+  border: 1px solid var(--dark-border);
+  border-radius: 3px;
+  color: var(--dark-text);
+  box-sizing: border-box;
+  margin-right: 5px; /* 與刪除按鈕間隔 */
   font-size: 1rem;
-  font-weight: bold;
-  padding: 4px;
-  width: 70%;
-  outline: none;
-  transition: border-bottom-color 0.2s ease;
+  text-align: center; /* 新增置中 */
 }
 
 .device-name-input:hover, .device-name-input:focus {
@@ -338,6 +340,7 @@ body {
 }
 
 /* API 狀態顯示器 */
+/*
 .api-status {
   margin: 10px 0;
   padding: 8px;
@@ -376,6 +379,26 @@ body {
   font-size: 0.8rem;
   color: #ffc107;
   margin-left: 5px;
+}
+*/
+
+/* 新增: 添加設備按鈕容器 */
+.add-device-container {
+  text-align: center;
+  margin-top: 15px;
+  padding-top: 10px;
+  border-top: 1px solid var(--dark-border);
+}
+
+/* 新增: 添加設備按鈕樣式 */
+.add-device-btn {
+  padding: 8px 20px;
+  cursor: pointer;
+  background-color: var(--dark-component);
+  color: white;
+  border: 1px solid var(--dark-highlight);
+  border-radius: 3px;
+  font-size: 0.9rem;
 }
 
 button:disabled {

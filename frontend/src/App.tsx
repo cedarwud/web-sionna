@@ -82,6 +82,7 @@ const convertBackendToFrontend = (backendDevice: BackendDevice): Device => {
 function App() {
     const [devices, setDevices] = useState<Device[]>([])
     const [tempDevices, setTempDevices] = useState<Device[]>([])
+    const [originalDevices, setOriginalDevices] = useState<Device[]>([])
     const [loading, setLoading] = useState<boolean>(true)
     const [error, setError] = useState<string | null>(null)
     const [apiStatus, setApiStatus] = useState<
@@ -106,6 +107,7 @@ function App() {
 
                 setDevices(frontendDevices)
                 setTempDevices(frontendDevices)
+                setOriginalDevices(frontendDevices)
                 setError(null)
                 setApiStatus('connected')
             } catch (err: any) {
@@ -129,6 +131,7 @@ function App() {
                 )
                 setDevices(defaultDevices)
                 setTempDevices(defaultDevices)
+                setOriginalDevices(defaultDevices)
             } finally {
                 setLoading(false)
             }
@@ -137,7 +140,7 @@ function App() {
         fetchDevices()
     }, [])
 
-    // 處理應用更改 - 將更改保存到後端
+    // 處理應用更改 - 將修改保存到後端
     const handleApply = async () => {
         if (apiStatus !== 'connected') {
             setError('無法保存更改：API連接未建立')
@@ -148,22 +151,36 @@ function App() {
             setLoading(true)
             setError(null)
 
-            // 獲取已刪除的設備 ID
-            const deletedDeviceIds = devices
-                .filter(
-                    (device) =>
-                        !tempDevices.some((temp) => temp.id === device.id)
+            // 找出實際被修改過的、已存在的設備
+            const devicesToUpdate = tempDevices.filter((tempDevice) => {
+                // 只處理已存在於後端的設備
+                if (tempDevice.id <= 0) return false
+                // 找到對應的原始設備
+                const originalDevice = originalDevices.find(
+                    (org) => org.id === tempDevice.id
                 )
-                .map((device) => device.id)
-                .filter((id) => id > 0) // 只考慮真實的後端ID（正數）
+                // 如果找不到原始設備，或者設備內容與原始狀態不同，則標記為需要更新
+                return (
+                    !originalDevice ||
+                    JSON.stringify(tempDevice) !==
+                        JSON.stringify(originalDevice)
+                )
+            })
 
-            // 處理已刪除的設備
-            for (const id of deletedDeviceIds) {
-                await deleteDevice(id)
+            if (devicesToUpdate.length === 0) {
+                console.log('沒有檢測到需要保存的更改。')
+                setLoading(false)
+                // 可以選擇性地將 tempDevices 重置回 originalDevices，如果需要的話
+                // setTempDevices([...originalDevices]);
+                return // 沒有更改，提前退出
             }
 
-            // 處理更新和新增的設備
-            for (const device of tempDevices) {
+            console.log('準備更新以下設備:', devicesToUpdate)
+
+            // 處理更新的設備
+            // 注意：後端的 updateDevice API 在成功更新數據庫後，
+            // **應負責觸發** 任何必要的重新計算（例如光線追蹤、星座圖邏輯）。
+            for (const device of devicesToUpdate) {
                 const { deviceType, transmitterType } = mapToBackendType(
                     device.type
                 )
@@ -175,32 +192,32 @@ function App() {
                     z: device.z,
                     active: device.active,
                     device_type: deviceType,
+                    // 確保傳遞 transmitter_type，即使是 undefined
                     transmitter_type: transmitterType,
                 }
 
-                if (device.id > 0) {
-                    // 更新現有設備
-                    await updateDevice(device.id, backendData)
-                } else {
-                    // 創建新設備
-                    await createDevice({
-                        ...backendData,
-                        device_type: deviceType,
-                    })
-                }
+                console.log(`正在更新設備 ID: ${device.id}，數據:`, backendData)
+                await updateDevice(device.id, backendData) // 調用後端修改 API
+                console.log(`設備 ID: ${device.id} 更新成功`)
             }
 
             // 重新獲取設備列表以反映最新狀態
+            // 這也會觸發依賴此狀態的前端組件（如 SceneViewer, ConstellationViewer）重新渲染
+            console.log('所有更新完成，正在重新獲取設備列表...')
             const updatedBackendDevices = await getDevices()
             const updatedFrontendDevices = updatedBackendDevices.map(
                 convertBackendToFrontend
             )
             setDevices(updatedFrontendDevices)
             setTempDevices(updatedFrontendDevices)
+            setOriginalDevices(updatedFrontendDevices) // 更新原始狀態為最新已保存狀態
+            console.log('設備列表已更新，前端應已觸發重新渲染')
         } catch (err: any) {
-            console.error('保存設備失敗:', err)
+            console.error('保存設備更新失敗:', err)
             const errorMessage = err.message || '未知錯誤'
-            setError(`保存設備數據時發生錯誤: ${errorMessage}`)
+            setError(`保存設備更新時發生錯誤: ${errorMessage}`)
+            // 出錯時，考慮將 tempDevices 恢復到 originalDevices
+            // setTempDevices([...originalDevices]);
         } finally {
             setLoading(false)
         }
@@ -208,7 +225,7 @@ function App() {
 
     // 處理取消更改
     const handleCancel = () => {
-        setTempDevices([...devices])
+        setTempDevices([...originalDevices])
         setError(null)
     }
 
@@ -231,24 +248,83 @@ function App() {
     }
 
     // 處理刪除設備
-    const handleDeleteDevice = (id: number) => {
-        setTempDevices((prev) => prev.filter((device) => device.id !== id))
+    const handleDeleteDevice = async (id: number) => {
+        // 新增：直接調用 API 刪除設備
+        if (apiStatus !== 'connected') {
+            setError('無法刪除設備：API連接未建立')
+            return
+        }
+
+        // 添加確認對話框
+        if (!window.confirm('確定要刪除這個設備嗎？此操作將立即生效。')) {
+            return
+        }
+
+        try {
+            setLoading(true)
+            setError(null)
+            console.log(`嘗試刪除設備 ID: ${id}`)
+            await deleteDevice(id)
+            console.log(`設備 ID: ${id} 刪除成功，正在重新獲取列表...`)
+
+            // 重新獲取設備列表以反映刪除
+            const updatedBackendDevices = await getDevices()
+            const updatedFrontendDevices = updatedBackendDevices.map(
+                convertBackendToFrontend
+            )
+            setDevices(updatedFrontendDevices)
+            setTempDevices(updatedFrontendDevices)
+            setOriginalDevices(updatedFrontendDevices)
+            console.log('設備列表已更新')
+        } catch (err: any) {
+            console.error(`刪除設備 ID: ${id} 失敗:`, err)
+            const errorMessage = err.message || '未知錯誤'
+            setError(`刪除設備時發生錯誤: ${errorMessage}`)
+        } finally {
+            setLoading(false)
+        }
     }
 
     // 處理添加新設備
-    const handleAddDevice = () => {
-        // 創建新設備（前端暫存，尚未保存到後端）
-        const newDeviceId = Math.min(0, ...tempDevices.map((d) => d.id)) - 1 // 用負數作為臨時ID
-        const newDevice: Device = {
-            id: newDeviceId,
-            name: `設備 ${-newDeviceId}`, // 默認名稱
+    const handleAddDevice = async () => {
+        // 新增：直接調用 API 創建設備
+        const defaultNewDeviceData = {
+            name: `新設備 ${Date.now()}`.slice(-10), // 產生一個相對唯一的名稱
             x: 0,
             y: 0,
             z: 0,
             active: true,
-            type: 'tx',
+            device_type: BackendDeviceType.TRANSMITTER, // 預設為 Tx
         }
-        setTempDevices([...tempDevices, newDevice])
+
+        if (apiStatus !== 'connected') {
+            setError('無法添加設備：API連接未建立')
+            return
+        }
+
+        try {
+            setLoading(true) // 顯示載入狀態
+            setError(null)
+            console.log('嘗試創建新設備:', defaultNewDeviceData)
+            await createDevice(defaultNewDeviceData)
+            console.log('設備創建成功，正在重新獲取列表...')
+
+            // 重新獲取設備列表以包含新設備
+            const updatedBackendDevices = await getDevices()
+            const updatedFrontendDevices = updatedBackendDevices.map(
+                convertBackendToFrontend
+            )
+            setDevices(updatedFrontendDevices)
+            setTempDevices(updatedFrontendDevices)
+            setOriginalDevices(updatedFrontendDevices)
+            console.log('設備列表已更新')
+        } catch (err: any) {
+            console.error('添加設備失敗:', err)
+            const errorMessage = err.message || '未知錯誤'
+            setError(`添加設備時發生錯誤: ${errorMessage}`)
+        } finally {
+            setLoading(false) // 隱藏載入狀態
+        }
     }
 
     if (loading) {
@@ -265,10 +341,9 @@ function App() {
                                 onClick={handleApply}
                                 disabled={apiStatus !== 'connected'}
                             >
-                                應用
+                                Apply
                             </button>
-                            <button onClick={handleCancel}>取消</button>
-                            <button onClick={handleAddDevice}>添加設備</button>
+                            <button onClick={handleCancel}>Cancel</button>
                         </div>
                         <div className="scene-selector">
                             <select
@@ -286,21 +361,6 @@ function App() {
                         </div>
                     </div>
                     {error && <div className="error-message">{error}</div>}
-                    <div className="api-status">
-                        API 狀態:
-                        <span className={`status-indicator ${apiStatus}`}>
-                            {apiStatus === 'connected'
-                                ? '已連接'
-                                : apiStatus === 'error'
-                                ? '連接錯誤'
-                                : '未連接'}
-                        </span>
-                        {apiStatus !== 'connected' && (
-                            <span className="status-warning">
-                                （僅本地編輯模式，無法保存到後端）
-                            </span>
-                        )}
-                    </div>
                     <div className="devices-list">
                         {tempDevices.map((device) => (
                             <div key={device.id} className="device-item">
@@ -434,6 +494,14 @@ function App() {
                                 </div>
                             </div>
                         ))}
+                    </div>
+                    <div className="add-device-container">
+                        <button
+                            onClick={handleAddDevice}
+                            className="add-device-btn"
+                        >
+                            Add
+                        </button>
                     </div>
                 </div>
                 <div className="main-content">
