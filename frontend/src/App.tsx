@@ -89,6 +89,7 @@ function App() {
         'disconnected' | 'connected' | 'error'
     >('disconnected')
     const [selectedScene, setSelectedScene] = useState<string>('Etoile')
+    const [hasTempDevices, setHasTempDevices] = useState<boolean>(false)
 
     // 從API獲取設備數據
     useEffect(() => {
@@ -151,14 +152,19 @@ function App() {
             setLoading(true)
             setError(null)
 
-            // 找出實際被修改過的、已存在的設備
+            // 1. 處理需要創建的新設備（ID 為負數的臨時設備）
+            const newDevices = tempDevices.filter((device) => device.id < 0)
+
+            // 2. 找出需要更新的已存在設備
             const devicesToUpdate = tempDevices.filter((tempDevice) => {
-                // 只處理已存在於後端的設備
+                // 只處理已存在於後端的設備（ID > 0）
                 if (tempDevice.id <= 0) return false
+
                 // 找到對應的原始設備
                 const originalDevice = originalDevices.find(
                     (org) => org.id === tempDevice.id
                 )
+
                 // 如果找不到原始設備，或者設備內容與原始狀態不同，則標記為需要更新
                 return (
                     !originalDevice ||
@@ -167,19 +173,36 @@ function App() {
                 )
             })
 
-            if (devicesToUpdate.length === 0) {
+            if (newDevices.length === 0 && devicesToUpdate.length === 0) {
                 console.log('沒有檢測到需要保存的更改。')
                 setLoading(false)
-                // 可以選擇性地將 tempDevices 重置回 originalDevices，如果需要的話
-                // setTempDevices([...originalDevices]);
                 return // 沒有更改，提前退出
             }
 
-            console.log('準備更新以下設備:', devicesToUpdate)
+            // 首先創建新設備
+            for (const device of newDevices) {
+                console.log('準備創建新設備:', device)
 
-            // 處理更新的設備
-            // 注意：後端的 updateDevice API 在成功更新數據庫後，
-            // **應負責觸發** 任何必要的重新計算（例如光線追蹤、星座圖邏輯）。
+                const { deviceType, transmitterType } = mapToBackendType(
+                    device.type
+                )
+
+                const backendData = {
+                    name: device.name,
+                    x: device.x,
+                    y: device.y,
+                    z: device.z,
+                    active: device.active,
+                    device_type: deviceType,
+                    transmitter_type: transmitterType,
+                }
+
+                console.log('調用 API 創建設備，數據:', backendData)
+                await createDevice(backendData)
+                console.log('新設備創建成功')
+            }
+
+            // 然後更新已有設備
             for (const device of devicesToUpdate) {
                 const { deviceType, transmitterType } = mapToBackendType(
                     device.type
@@ -201,8 +224,7 @@ function App() {
                 console.log(`設備 ID: ${device.id} 更新成功`)
             }
 
-            // 重新獲取設備列表以反映最新狀態
-            // 這也會觸發依賴此狀態的前端組件（如 SceneViewer, ConstellationViewer）重新渲染
+            // 所有更改完成後，重新獲取設備列表
             console.log('所有更新完成，正在重新獲取設備列表...')
             const updatedBackendDevices = await getDevices()
             const updatedFrontendDevices = updatedBackendDevices.map(
@@ -211,13 +233,13 @@ function App() {
             setDevices(updatedFrontendDevices)
             setTempDevices(updatedFrontendDevices)
             setOriginalDevices(updatedFrontendDevices) // 更新原始狀態為最新已保存狀態
+            // 重置臨時設備標記
+            setHasTempDevices(false)
             console.log('設備列表已更新，前端應已觸發重新渲染')
         } catch (err: any) {
             console.error('保存設備更新失敗:', err)
             const errorMessage = err.message || '未知錯誤'
             setError(`保存設備更新時發生錯誤: ${errorMessage}`)
-            // 出錯時，考慮將 tempDevices 恢復到 originalDevices
-            // setTempDevices([...originalDevices]);
         } finally {
             setLoading(false)
         }
@@ -226,6 +248,7 @@ function App() {
     // 處理取消更改
     const handleCancel = () => {
         setTempDevices([...originalDevices])
+        setHasTempDevices(false)
         setError(null)
     }
 
@@ -245,11 +268,29 @@ function App() {
                 device.id === id ? { ...device, [field]: value } : device
             )
         )
+
+        // 如果修改了現有設備，標記有臨時變更
+        if (id > 0) {
+            // 找到對應的原始設備
+            const originalDevice = originalDevices.find((dev) => dev.id === id)
+            // 檢查當前值與原始值是否不同
+            if (originalDevice && originalDevice[field] !== value) {
+                setHasTempDevices(true)
+            }
+        }
     }
 
     // 處理刪除設備
     const handleDeleteDevice = async (id: number) => {
-        // 新增：直接調用 API 刪除設備
+        // 判斷是否為臨時設備（ID < 0）
+        if (id < 0) {
+            // 如果是臨時設備，直接從前端狀態中移除
+            setTempDevices((prev) => prev.filter((device) => device.id !== id))
+            console.log(`已從前端移除臨時設備 ID: ${id}`)
+            return
+        }
+
+        // 以下是處理實際存在於後端的設備
         if (apiStatus !== 'connected') {
             setError('無法刪除設備：API連接未建立')
             return
@@ -286,45 +327,33 @@ function App() {
     }
 
     // 處理添加新設備
-    const handleAddDevice = async () => {
-        // 新增：直接調用 API 創建設備
-        const defaultNewDeviceData = {
-            name: `新設備 ${Date.now()}`.slice(-10), // 產生一個相對唯一的名稱
+    const handleAddDevice = () => {
+        // 產生一個負數 ID，用於標識臨時設備
+        const tempId = -Math.floor(Math.random() * 1000000) - 1
+
+        // 計算現有的 tx 設備數量（只計算 type 為 'tx' 的設備，不包括 'int'）
+        const existingTxCount = tempDevices.filter(
+            (device) => device.type === 'tx'
+        ).length
+
+        // 創建一個新的臨時設備，名稱格式為 "tx_編號"
+        const newDevice: Device = {
+            id: tempId,
+            name: `tx_${existingTxCount + 1}`,
             x: 0,
             y: 0,
             z: 0,
             active: true,
-            device_type: BackendDeviceType.TRANSMITTER, // 預設為 Tx
+            type: 'tx', // 預設為 Tx
         }
 
-        if (apiStatus !== 'connected') {
-            setError('無法添加設備：API連接未建立')
-            return
-        }
+        // 更新 tempDevices 狀態，添加新的臨時設備
+        setTempDevices((prev) => [...prev, newDevice])
+        // 標記有臨時設備
+        setHasTempDevices(true)
 
-        try {
-            setLoading(true) // 顯示載入狀態
-            setError(null)
-            console.log('嘗試創建新設備:', defaultNewDeviceData)
-            await createDevice(defaultNewDeviceData)
-            console.log('設備創建成功，正在重新獲取列表...')
-
-            // 重新獲取設備列表以包含新設備
-            const updatedBackendDevices = await getDevices()
-            const updatedFrontendDevices = updatedBackendDevices.map(
-                convertBackendToFrontend
-            )
-            setDevices(updatedFrontendDevices)
-            setTempDevices(updatedFrontendDevices)
-            setOriginalDevices(updatedFrontendDevices)
-            console.log('設備列表已更新')
-        } catch (err: any) {
-            console.error('添加設備失敗:', err)
-            const errorMessage = err.message || '未知錯誤'
-            setError(`添加設備時發生錯誤: ${errorMessage}`)
-        } finally {
-            setLoading(false) // 隱藏載入狀態
-        }
+        // 注意：此時並不調用 API 創建設備
+        console.log('已在前端創建臨時設備:', newDevice)
     }
 
     if (loading) {
@@ -505,6 +534,22 @@ function App() {
                     </div>
                 </div>
                 <div className="main-content">
+                    {/* 顯示警告訊息，如果有臨時設備 */}
+                    {hasTempDevices && (
+                        <div
+                            className="warning-message"
+                            style={{
+                                color: 'orange',
+                                padding: '10px',
+                                textAlign: 'center',
+                            }}
+                        >
+                            您有未保存的設備更改。請點擊 Apply
+                            按鈕保存更改並更新圖像。
+                        </div>
+                    )}
+
+                    {/* 渲染可視化組件 */}
                     <SceneViewer />
                     <ConstellationViewer />
                 </div>
