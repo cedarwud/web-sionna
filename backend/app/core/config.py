@@ -27,7 +27,11 @@ if not DATABASE_URL.startswith("postgresql+asyncpg"):
 
 
 # --- Sionna/Simulation Constants ---
-OUTPUT_DIR = "rendered_images"
+# Define the path relative to the backend script's location
+# BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # backend/app -> backend -> root
+# OUTPUT_DIR = os.path.join(BACKEND_DIR, "..", "frontend", "public", "rendered_images")
+# Simplified relative path assuming execution from workspace root or backend/ directory
+OUTPUT_DIR = "../frontend/public/rendered_images"
 # 建立目錄的操作可以在應用程式啟動時或首次使用前執行
 # os.makedirs(OUTPUT_DIR, exist_ok=True) # 移到 lifespan 或使用時檢查
 

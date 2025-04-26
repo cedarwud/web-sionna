@@ -79,6 +79,25 @@ const convertBackendToFrontend = (backendDevice: BackendDevice): Device => {
     }
 }
 
+// 輔助函數：計算啟用設備的數量
+const countActiveDevices = (
+    deviceList: Device[]
+): { activeTx: number; activeRx: number } => {
+    let activeTx = 0
+    let activeRx = 0
+    deviceList.forEach((d) => {
+        if (d.active) {
+            if (d.type === 'tx') {
+                activeTx++
+            } else if (d.type === 'rx') {
+                activeRx++
+            }
+            // 'int' 類型雖然是 transmitter，但規則是針對 'tx' 和 'rx'
+        }
+    })
+    return { activeTx, activeRx }
+}
+
 function App() {
     const [devices, setDevices] = useState<Device[]>([])
     const [tempDevices, setTempDevices] = useState<Device[]>([])
@@ -143,6 +162,20 @@ function App() {
 
     // 處理應用更改 - 將修改保存到後端
     const handleApply = async () => {
+        // --- 開始：加入檢查邏輯 ---
+        const { activeTx: currentActiveTx, activeRx: currentActiveRx } =
+            countActiveDevices(tempDevices)
+
+        if (currentActiveTx < 1 || currentActiveRx < 1) {
+            alert(
+                '套用失敗：操作後必須至少保留一個啟用的發射器 (tx) 和一個啟用的接收器 (rx)。請檢查設備的啟用狀態。'
+            )
+            // 可以選擇是否恢復更改，例如：
+            // handleCancel();
+            return // 阻止執行 API 呼叫
+        }
+        // --- 結束：加入檢查邏輯 ---
+
         if (apiStatus !== 'connected') {
             setError('無法保存更改：API連接未建立')
             return
@@ -413,16 +446,24 @@ function App() {
 
     // 處理刪除設備
     const handleDeleteDevice = async (id: number) => {
-        // 判斷是否為臨時設備（ID < 0）
-        if (id < 0) {
-            // 如果是臨時設備，直接從前端狀態中移除
-            setTempDevices((prev) => prev.filter((device) => device.id !== id))
-            console.log(`已從前端移除臨時設備 ID: ${id}`)
-            return
-        }
+        // --- 開始：加入檢查邏輯 ---
+        // 模擬刪除後的裝置列表
+        const devicesAfterDelete = tempDevices.filter(
+            (device) => device.id !== id
+        )
+        const { activeTx: futureActiveTx, activeRx: futureActiveRx } =
+            countActiveDevices(devicesAfterDelete)
 
-        // 以下是處理實際存在於後端的設備
-        if (apiStatus !== 'connected') {
+        if (futureActiveTx < 1 || futureActiveRx < 1) {
+            alert(
+                '刪除失敗：操作後必須至少保留一個啟用的發射器 (tx) 和一個啟用的接收器 (rx)。'
+            )
+            return // 阻止執行 API 呼叫
+        }
+        // --- 結束：加入檢查邏輯 ---
+
+        if (apiStatus !== 'connected' && id > 0) {
+            // 只有後端存在的設備才需要API
             setError('無法刪除設備：API連接未建立')
             return
         }

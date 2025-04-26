@@ -517,31 +517,24 @@ async def generate_constellation_plot(
 
 # --- 新增：渲染空場景的函數 ---
 def generate_empty_scene_image(output_path: str):
-    """只渲染空的 Etoile 場景，使用指定的攝影機角度。"""
-    logger.info(">>> 執行 generate_empty_scene_image 函數...")
+    """Generates a simple empty scene image."""
+    logger.info("Entering generate_empty_scene_image function...")
     try:
-        logger.info("載入 Sionna 場景 ('etoile')...")
-        scene = load_scene(sionna.rt.scene.etoile)
-        logger.info("場景載入成功.")
-        logger.info("定義攝影機...")
-        my_cam = Camera(position=[0, 0, 1000], look_at=[0, 1, 0])
-        logger.info("準備渲染空場景...")
+        scene = load_scene(sionna.rt.scene.etoile)  # Load a base scene
+        my_cam = Camera(position=[0, 0, 1000], look_at=[0, 1, 0])  # Default camera
+
         fig = plt.figure()
         scene.render(
             camera=my_cam, resolution=[800, 600], num_samples=64
-        )  # 使用較低的採樣數加快速度
-        logger.info("scene.render() (空場景) 執行完畢.")
-        logger.info(f"儲存空場景圖像至 {output_path}...")
+        )  # Lower samples for faster empty scene
+
+        # Ensure the directory exists before saving
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         plt.savefig(output_path, bbox_inches="tight", pad_inches=0, dpi=150)
-        logger.info("空場景圖像儲存成功.")
         plt.close(fig)
-        logger.info(f"<<< 空場景已渲染並儲存至: {output_path}, 函數返回 True.")
+        logger.info(f"Empty scene image saved to: {output_path}")
         return True
     except Exception as e:
-        logger.error(f"!!! 在 generate_empty_scene_image 中發生錯誤: {e}")
-        import traceback
-
-        logger.error(traceback.format_exc())
+        logger.error(f"Error generating empty scene image: {e}", exc_info=True)
         plt.close("all")
-        logger.error("<<< 空場景渲染失敗，函數返回 False.")
         return False
