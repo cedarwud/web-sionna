@@ -61,6 +61,9 @@ class Device(DeviceInDBBase):
     transmitter: Optional[TransmitterSchema] = None
     # receiver: Optional[ReceiverSchema] = None # If Receiver schema is defined
 
+    class Config:
+        from_attributes = True
+
 
 # 可設定參數版本，用於 Response 的 Schema
 class DeviceParameters(DeviceBase):

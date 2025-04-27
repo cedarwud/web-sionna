@@ -71,7 +71,7 @@ body {
 
 .sidebar {
   width: 300px;
-  background-color: var(--dark-accent);
+  background-color: var(--dark-bg);
   height: 100vh;
   overflow-y: auto;
   border-right: 1px solid var(--dark-border);
@@ -163,31 +163,40 @@ body {
 }
 
 .device-item {
-  background-color: var(--dark-component);
+  background-color: var(--dark-accent);
   border-radius: 5px;
   padding: 10px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .device-header {
-  font-weight: bold;
-  margin-bottom: 8px;
-  padding-bottom: 5px;
-  border-bottom: 1px solid var(--dark-border);
-  color: var(--dark-text);
-  text-align: center;
   position: relative;
+  margin-bottom: 10px;
 }
 
 .device-header .delete-btn {
   position: absolute;
-  right: 0;
-  top: 38%;
+  right: 5px;
+  top: 50%;
   transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--dark-text-secondary);
+  cursor: pointer;
+  font-size: 20px;
+  padding: 0 5px;
+  opacity: 0.6;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+
+.device-header .delete-btn:hover {
+  opacity: 1;
 }
 
 .device-content {
-  padding: 5px 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--dark-border);
 }
 
 .device-table {
@@ -322,21 +331,22 @@ body {
   border-left: 4px solid #c62828;
 }
 
-.device-name-input {
-  width: calc(100% - 50px); /* 留出空間給刪除按鈕 */
-  padding: 6px 8px;
-  background-color: var(--dark-input-bg);
+.device-item .device-name-input {
+  width: 100%;
+  padding: 8px 10px;
+  background-color: var(--dark-component);
+  color: var(--dark-text);
   border: 1px solid var(--dark-border);
   border-radius: 3px;
-  color: var(--dark-text);
+  font-size: 16px;
+  text-align: center;
   box-sizing: border-box;
-  margin-right: 5px; /* 與刪除按鈕間隔 */
-  font-size: 1rem;
-  text-align: center; /* 新增置中 */
 }
 
-.device-name-input:hover, .device-name-input:focus {
-  border-bottom-color: #2196f3;
+.device-item .device-name-input:hover, 
+.device-item .device-name-input:focus {
+  border-bottom-color: transparent;
+  outline: none;
 }
 
 /* API 狀態顯示器 */
@@ -390,15 +400,22 @@ body {
   border-top: 1px solid var(--dark-border);
 }
 
-/* 新增: 添加設備按鈕樣式 */
+/* 更新: 添加設備按鈕樣式以匹配主按鈕 */
 .add-device-btn {
-  padding: 8px 20px;
+  padding: 6px 14px; /* 保持 Apply 按鈕的大小 */
   cursor: pointer;
-  background-color: var(--dark-component);
-  color: white;
-  border: 1px solid var(--dark-highlight);
+  /* background-color: var(--dark-button-primary); */ /* 註解掉主按鈕顏色 */
+  background-color: var(--dark-component); /* 恢復原始暗色背景 */
+  color: white; /* 保持白色文字 */
+  /* border: none; */ /* 註解掉無邊框 */
+  border: 1px solid var(--dark-highlight); /* 恢復原始邊框 */
   border-radius: 3px;
-  font-size: 0.9rem;
+  font-size: 0.85rem; /* 匹配 Apply 按鈕 */
+}
+
+.add-device-btn:hover {
+   /* 可以添加 hover 效果，例如輕微變暗 */
+  filter: brightness(90%);
 }
 
 button:disabled {

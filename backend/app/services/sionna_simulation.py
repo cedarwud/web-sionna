@@ -17,6 +17,8 @@ from sionna.rt import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 import collections.abc  # Import for checking iterable
+import tempfile  # <--- 新增導入
+import shutil  # <--- 新增導入
 
 # Import models and config from their new locations
 from app.db.models import Device, Transmitter, Receiver, DeviceType, TransmitterType
@@ -176,15 +178,14 @@ async def generate_scene_with_paths_image(
 ) -> bool:
     logger.info("Entering generate_scene_with_paths_image function...")
     try:
-        # 使用更高效率的函數
         transmitters_data, receivers_data = await get_active_devices_from_db_efficient(
             session
         )
+        # 修改：檢查是否有有效的發射器和接收器數據列表
         if not transmitters_data or not receivers_data:
+            logger.error("No active transmitters or receivers found in the database.")
             return False
-        rx_data = receivers_data[0]
-        if not rx_data.position_list:
-            return False
+        # 不再只取第一個 rx_data = receivers_data[0]
 
         scene = load_scene(sionna.rt.scene.etoile)
         iso = PlanarArray(num_rows=1, num_cols=1, pattern="iso", polarization="V")
@@ -194,8 +195,16 @@ async def generate_scene_with_paths_image(
         sionna_txs = []
         for tx_data in transmitters_data:
             if tx_data.position_list:
+                color_param = {}
+                if tx_data.transmitter_type == TransmitterType.INTERFERER:
+                    color_param = {"color": [0, 0, 0]}
+                    logger.info(
+                        f"Setting interferer {tx_data.device_model.name} color to black for scene rendering."
+                    )
                 sionna_tx = SionnaTransmitter(
-                    tx_data.device_model.name, position=tx_data.position_list
+                    tx_data.device_model.name,
+                    position=tx_data.position_list,
+                    **color_param,
                 )
                 sionna_txs.append(sionna_tx)
                 add_to_scene_safe(scene, sionna_tx)
@@ -204,21 +213,49 @@ async def generate_scene_with_paths_image(
                     f"Skipping transmitter '{tx_data.device_model.name}' due to invalid position."
                 )
 
-        sionna_rx = SionnaReceiver(
-            rx_data.device_model.name, position=rx_data.position_list
-        )
-        add_to_scene_safe(scene, sionna_rx)
+        # 修改：遍歷所有接收器數據並添加到場景
+        sionna_rxs = []  # 存儲創建的 SionnaReceiver 對象
+        valid_rx_positions_exist = False
+        for rx_data in receivers_data:
+            if rx_data.position_list:
+                sionna_rx = SionnaReceiver(
+                    rx_data.device_model.name, position=rx_data.position_list
+                )
+                sionna_rxs.append(sionna_rx)
+                add_to_scene_safe(scene, sionna_rx)
+                valid_rx_positions_exist = True
+            else:
+                logger.warning(
+                    f"Skipping receiver '{rx_data.device_model.name}' due to invalid position."
+                )
 
-        for stx in sionna_txs:
-            stx.look_at(sionna_rx)
+        # 如果處理完所有接收器後，沒有一個有有效位置，則退出
+        if not valid_rx_positions_exist:
+            logger.error("No receivers with valid positions found.")
+            return False
+
+        # 修改 look_at 邏輯：讓所有發射器指向第一個有效的接收器 (如果存在)
+        # 或者可以完全移除 look_at，solver 會處理所有配對
+        if sionna_rxs:  # 確保至少有一個有效的接收器被添加到場景
+            first_sionna_rx = sionna_rxs[0]
+            for stx in sionna_txs:
+                try:
+                    stx.look_at(first_sionna_rx)
+                except Exception as look_at_err:
+                    logger.warning(
+                        f"Error setting look_at for TX {stx.name}: {look_at_err}"
+                    )
+
+        # 修改：檢查場景中是否有有效的發射器和 *至少一個* 接收器
         if not scene.transmitters or not scene.receivers:
             logger.error(
-                "No valid transmitters or receivers were added to the Sionna scene."
+                "No valid transmitters or no valid receivers were added to the Sionna scene."
             )
             plt.close("all")
             return False
 
         solver = PathSolver()
+        # solver 會自動計算場景中所有 TX-RX 對的路徑
         paths = solver(
             scene,
             max_depth=6,
@@ -230,6 +267,7 @@ async def generate_scene_with_paths_image(
 
         my_cam = Camera(position=[0, 0, 1000], look_at=[0, 1, 0])
         fig = plt.figure()
+        # render 會顯示場景中所有的發射器、接收器和計算出的路徑
         scene.render(camera=my_cam, paths=paths, resolution=[800, 600], num_samples=128)
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -249,6 +287,8 @@ async def generate_constellation_plot(
 ) -> bool:
     """Generates constellation plot using active devices from the database via DeviceData."""
     logger.info("Entering generate_constellation_plot function...")
+    temp_file_path: Optional[str] = None  # <--- 初始化臨時文件路徑變數
+
     try:
         # --- 1. Fetch Active Devices Data ---
         # 使用更高效率的函數
@@ -302,7 +342,9 @@ async def generate_constellation_plot(
         sionna_interferer_txs = []
         for int_tx_data in interferer_txs_data:
             sionna_int_tx = SionnaTransmitter(
-                int_tx_data.device_model.name, position=int_tx_data.position_list
+                int_tx_data.device_model.name,
+                position=int_tx_data.position_list,
+                color=[0, 0, 0],  # 將干擾源顏色設為黑色
             )
             sionna_interferer_txs.append(sionna_int_tx)
             add_to_scene_safe(scene, sionna_int_tx)
@@ -461,8 +503,7 @@ async def generate_constellation_plot(
         logger.info("Baseband simulation complete.")
         # ***** 結束修正 *****
 
-        # --- 6. Plotting ---
-        # (保持不變)
+        # --- 6. Plotting & Saving ---
         logger.info("Plotting constellation diagram...")
         fig, ax = plt.subplots(1, 2, figsize=(9, 3.8))
         all_y_eq = np.concatenate((y_eq_no_i, y_eq_with_i))
@@ -502,16 +543,75 @@ async def generate_constellation_plot(
         )
         ax[1].grid(True)
         plt.tight_layout()
-        logger.info("Saving constellation diagram...")
+
+        # --- 使用臨時文件保存 ---
+        # 確保目標目錄存在
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        plt.savefig(output_path, bbox_inches="tight", dpi=100)
-        plt.close(fig)
-        logger.info(f"Constellation diagram generated and saved to: {output_path}")
-        return True
+        # 創建臨時文件 (delete=False 使得我們可以手動移動它)
+        with tempfile.NamedTemporaryFile(
+            suffix=".png", delete=False, dir=os.path.dirname(output_path)
+        ) as temp_f:
+            temp_file_path = temp_f.name
+            logger.info(
+                f"Saving constellation diagram to temporary file: {temp_file_path}"
+            )
+            plt.savefig(temp_file_path, bbox_inches="tight", dpi=100)
+        plt.close(fig)  # 在保存後關閉圖表
+
+        # 檢查臨時文件是否成功創建且不為空
+        if (
+            temp_file_path
+            and os.path.exists(temp_file_path)
+            and os.path.getsize(temp_file_path) > 0
+        ):
+            logger.info(f"Temporary file {temp_file_path} created successfully.")
+            # 原子地移動臨時文件到最終目標路徑
+            try:
+                shutil.move(temp_file_path, output_path)
+                logger.info(f"Moved temporary file to final destination: {output_path}")
+                return True
+            except Exception as move_err:
+                logger.error(
+                    f"Error moving temporary file {temp_file_path} to {output_path}: {move_err}",
+                    exc_info=True,
+                )
+                # 嘗試清理臨時文件
+                if os.path.exists(temp_file_path):
+                    try:
+                        os.remove(temp_file_path)
+                    except OSError as remove_err:
+                        logger.warning(
+                            f"Could not remove temporary file {temp_file_path} after move error: {remove_err}"
+                        )
+                return False
+        else:
+            logger.error(
+                f"Failed to save to temporary file or generated empty file: {temp_file_path}"
+            )
+            # 嘗試清理臨時文件
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                except OSError as remove_err:
+                    logger.warning(
+                        f"Could not remove potentially empty temporary file {temp_file_path}: {remove_err}"
+                    )
+            return False
 
     except Exception as e:
         logger.error(f"Error in generate_constellation_plot: {e}", exc_info=True)
-        plt.close("all")
+        plt.close("all")  # 確保關閉所有 matplotlib 圖表
+        # 嘗試清理可能的臨時文件
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+                logger.info(
+                    f"Cleaned up temporary file {temp_file_path} due to exception."
+                )
+            except OSError as remove_err:
+                logger.warning(
+                    f"Could not remove temporary file {temp_file_path} during exception handling: {remove_err}"
+                )
         return False
 
 

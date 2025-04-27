@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import SceneViewer from './components/SceneViewer'
 import ConstellationViewer from './components/ConstellationViewer'
 import './App.css'
@@ -111,54 +111,57 @@ function App() {
     const [hasTempDevices, setHasTempDevices] = useState<boolean>(false)
 
     // 從API獲取設備數據
-    useEffect(() => {
-        const fetchDevices = async () => {
-            try {
-                setLoading(true)
-                setApiStatus('disconnected')
-                console.log('嘗試從API獲取設備數據...')
-                const backendDevices = await getDevices() // backendDevices 現在有嵌套結構
-                console.log('成功獲取設備數據:', backendDevices) // 保留這個基礎的，用於確認數據獲取
+    const fetchDevices = useCallback(async () => {
+        try {
+            setLoading(true)
+            setApiStatus('disconnected')
+            console.log('嘗試從API獲取設備數據...')
+            const backendDevices = await getDevices() // backendDevices 現在有嵌套結構
+            console.log('成功獲取設備數據:', backendDevices)
 
-                // map 操作會使用更新後的 convertBackendToFrontend
-                const frontendDevices = backendDevices.map(
-                    convertBackendToFrontend
-                )
+            const frontendDevices = backendDevices.map(convertBackendToFrontend)
 
-                setDevices(frontendDevices)
-                setTempDevices(frontendDevices)
-                setOriginalDevices(frontendDevices)
-                setError(null)
-                setApiStatus('connected')
-            } catch (err: any) {
-                console.error('獲取設備失敗:', err)
-                const errorMessage = err.message || '未知錯誤'
-                setError(`獲取設備數據時發生錯誤: ${errorMessage}`)
-                setApiStatus('error')
+            setDevices(frontendDevices)
+            setTempDevices(frontendDevices)
+            setOriginalDevices(frontendDevices)
+            setError(null)
+            setApiStatus('connected')
+        } catch (err: any) {
+            console.error('獲取設備失敗:', err)
+            const errorMessage = err.message || '未知錯誤'
+            setError(`獲取設備數據時發生錯誤: ${errorMessage}`)
+            setApiStatus('error')
 
-                // 如果API連接失敗，使用一些默認設備數據進行開發測試
-                const defaultDevices: Device[] = Array.from(
-                    { length: 3 },
-                    (_, i) => ({
-                        id: -(i + 1), // 負數ID表示臨時數據
-                        name: `測試設備 ${i + 1}`,
-                        x: i * 10,
-                        y: i * 10,
-                        z: 0.0,
-                        active: true,
-                        type: ['tx', 'rx', 'int'][i % 3] as DeviceType,
-                    })
-                )
-                setDevices(defaultDevices)
-                setTempDevices(defaultDevices)
-                setOriginalDevices(defaultDevices)
-            } finally {
-                setLoading(false)
-            }
+            // 如果API連接失敗，使用一些默認設備數據進行開發測試
+            const defaultDevices: Device[] = Array.from(
+                { length: 3 },
+                (_, i) => ({
+                    id: -(i + 1), // 負數ID表示臨時數據
+                    name: `測試設備 ${i + 1}`,
+                    x: i * 10,
+                    y: i * 10,
+                    z: 0.0,
+                    active: true,
+                    type: ['tx', 'rx', 'int'][i % 3] as DeviceType,
+                })
+            )
+            setDevices(defaultDevices)
+            setTempDevices(defaultDevices)
+            setOriginalDevices(defaultDevices)
+        } finally {
+            setLoading(false)
         }
-
-        fetchDevices()
     }, [])
+
+    // Effect to fetch devices on mount
+    useEffect(() => {
+        fetchDevices()
+    }, [fetchDevices])
+
+    // Define the refresh function based on the stable fetchDevices
+    const refreshDeviceData = useCallback(() => {
+        fetchDevices()
+    }, [fetchDevices])
 
     // 處理應用更改 - 將修改保存到後端
     const handleApply = async () => {
@@ -519,13 +522,13 @@ function App() {
         const getPrefix = (type: DeviceType = 'tx') => {
             switch (type) {
                 case 'tx':
-                    return 'tx_'
+                    return 'tx-'
                 case 'rx':
-                    return 'rx_'
+                    return 'rx-'
                 case 'int':
-                    return 'int_'
+                    return 'int-'
                 default:
-                    return 'device_'
+                    return 'device-'
             }
         }
 
@@ -564,6 +567,31 @@ function App() {
         console.log('已在前端創建臨時設備:', newDevice)
     }
 
+    // --- 新增排序函式 ---
+    const sortDevices = (a: Device, b: Device): number => {
+        // 1. 按類型排序 (tx < rx < int)
+        const typeOrder: { [key in DeviceType]: number } = {
+            tx: 1,
+            rx: 2,
+            int: 3,
+        }
+        if (typeOrder[a.type] !== typeOrder[b.type]) {
+            return typeOrder[a.type] - typeOrder[b.type]
+        }
+
+        // 2. 如果類型相同，按名稱中的數字後綴排序
+        const extractNumber = (name: string): number => {
+            // 假設名稱格式為 "prefix-number"
+            const match = name.match(/-(\d+)$/)
+            return match ? parseInt(match[1], 10) : Infinity // 無法解析的數字排在後面
+        }
+        const numA = extractNumber(a.name)
+        const numB = extractNumber(b.name)
+
+        return numA - numB
+    }
+    // --- 結束排序函式 ---
+
     if (loading) {
         return <div className="loading">載入中...</div>
     }
@@ -599,7 +627,7 @@ function App() {
                     </div>
                     {error && <div className="error-message">{error}</div>}
                     <div className="devices-list">
-                        {tempDevices.map((device) => (
+                        {[...tempDevices].sort(sortDevices).map((device) => (
                             <div key={device.id} className="device-item">
                                 <div className="device-header">
                                     <input
@@ -758,7 +786,7 @@ function App() {
                     )}
 
                     {/* 渲染可視化組件 */}
-                    <SceneViewer />
+                    <SceneViewer refreshDeviceData={refreshDeviceData} />
                     <ConstellationViewer />
                 </div>
             </div>
