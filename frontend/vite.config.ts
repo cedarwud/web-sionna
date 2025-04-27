@@ -8,6 +8,10 @@ export default defineConfig({
         host: '0.0.0.0', // 👈 必填，表示聽所有網卡
         port: 5173, // 保持跟瀏覽器網址一致
         strictPort: true, // 如果 5173 被佔用就直接報錯，不會自動跳號
+        hmr: {
+            host: '120.126.151.101', // 👈 請將這裡替換成您的伺服器可被瀏覽器訪問的實際 IP 或主機名
+            port: 5173, // 保持與 server.port 一致
+        },
         proxy: {
             // 將所有以 /api 開頭的請求都代理到後端
             '/api': {
