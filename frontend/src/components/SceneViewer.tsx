@@ -838,7 +838,7 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
 
         return (
             <div style={{ position: 'relative' }}>
-                {isLoading && <p>正在載入圖片...</p>}
+                {isLoading && <p>正在載入路徑圖...</p>}
                 {error && (
                     <div
                         style={{
@@ -1127,7 +1127,6 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                                         boxSizing: 'border-box',
                                                         textAlign: 'right',
                                                     }}
-                                                    readOnly={isEditing}
                                                 />
                                             </td>
                                             <td
@@ -1155,7 +1154,6 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                                         boxSizing: 'border-box',
                                                         textAlign: 'right',
                                                     }}
-                                                    readOnly={isEditing}
                                                 />
                                             </td>
                                             <td
