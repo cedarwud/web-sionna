@@ -17,7 +17,7 @@ import {
 type DeviceType = 'tx' | 'rx' | 'int'
 
 // 前端設備介面
-interface Device {
+export interface Device {
     id: number
     name: string // 添加名稱字段
     x: number
@@ -367,81 +367,95 @@ function App() {
         value: any
     ) => {
         setTempDevices((prev) => {
-            // 如果修改的是設備類型，可能需要同時修改名稱
             if (field === 'type') {
                 const deviceToUpdate = prev.find((d) => d.id === id)
                 if (deviceToUpdate) {
-                    // 獲取當前設備名稱
                     const currentName = deviceToUpdate.name
-                    // 檢查名稱是否使用默認前綴格式
-                    const isDefaultNamingFormat = /^(tx|rx|int)_\d+$/.test(
+                    const isDefaultNamingFormat = /^(tx|rx|int)-\d+$/.test(
                         currentName
                     )
+                    const newType = value as DeviceType
 
-                    if (isDefaultNamingFormat) {
-                        // 如果使用默認命名格式，則隨類型變更而更新名稱
-                        // 根據新類型生成前綴
-                        const getPrefix = (type: DeviceType) => {
+                    // Only auto-update name if it was default or it's a new device
+                    if (isDefaultNamingFormat || deviceToUpdate.id < 0) {
+                        const getPrefix = (type: DeviceType): string => {
                             switch (type) {
                                 case 'tx':
-                                    return 'tx_'
+                                    return 'tx-'
                                 case 'rx':
-                                    return 'rx_'
+                                    return 'rx-'
                                 case 'int':
-                                    return 'int_'
+                                    return 'int-'
                                 default:
-                                    return 'device_'
+                                    return 'device-'
                             }
                         }
-                        const newPrefix = getPrefix(value as DeviceType)
+                        const newPrefix = getPrefix(newType)
 
-                        // 提取當前名稱中的數字部分
-                        const match = currentName.match(/_(\d+)$/)
-                        const numberPart = match ? match[1] : '1'
+                        // Find the max number among existing devices of the NEW type (excluding the current one)
+                        let maxNum = 0
+                        prev.forEach((device) => {
+                            // Skip the device being edited
+                            if (device.id === id) return
 
-                        // 組合新名稱
-                        const newName = `${newPrefix}${numberPart}`
+                            if (device.name.startsWith(newPrefix)) {
+                                const match = device.name.match(/-(\d+)$/)
+                                if (match) {
+                                    const num = parseInt(match[1], 10)
+                                    if (!isNaN(num) && num > maxNum) {
+                                        maxNum = num
+                                    }
+                                }
+                            }
+                        })
 
-                        // 確保新名稱不與其他設備重複
+                        const newNumber = maxNum + 1
+                        const newName = `${newPrefix}${newNumber}`
+
+                        // Note: Uniqueness check might be redundant now but kept for safety
                         let uniqueName = newName
-                        let suffix = 1
-
-                        // 獲取除了當前設備外的所有設備名稱
+                        let suffix = newNumber
                         const otherNames = prev
                             .filter((d) => d.id !== id)
                             .map((d) => d.name)
-
                         while (otherNames.includes(uniqueName)) {
                             suffix++
                             uniqueName = `${newPrefix}${suffix}`
                         }
 
-                        // 同時更新類型和名稱
+                        // Update type and the newly generated name
                         return prev.map((device) =>
                             device.id === id
-                                ? {
-                                      ...device,
-                                      [field]: value,
-                                      name: uniqueName,
-                                  }
+                                ? { ...device, type: newType, name: uniqueName }
+                                : device
+                        )
+                    }
+                    // If name wasn't default and it's not a new device, just update type
+                    else {
+                        return prev.map((device) =>
+                            device.id === id
+                                ? { ...device, type: newType } // Only update type
                                 : device
                         )
                     }
                 }
             }
 
-            // 常規更新邏輯
+            // Handle other field changes (non-type)
             return prev.map((device) =>
                 device.id === id ? { ...device, [field]: value } : device
             )
         })
 
-        // 如果修改了現有設備，標記有臨時變更
+        // Mark changes if a persistent device (id > 0) was modified
         if (id > 0) {
-            // 找到對應的原始設備
             const originalDevice = originalDevices.find((dev) => dev.id === id)
-            // 檢查當前值與原始值是否不同
-            if (originalDevice && originalDevice[field] !== value) {
+            const currentDevice = tempDevices.find((d) => d.id === id)
+            // Check against original state or if the value actually changed compared to current temp state
+            if (
+                originalDevice &&
+                JSON.stringify(currentDevice) !== JSON.stringify(originalDevice)
+            ) {
                 setHasTempDevices(true)
             }
         }
@@ -627,7 +641,7 @@ function App() {
                     </div>
                     {error && <div className="error-message">{error}</div>}
                     <div className="devices-list">
-                        {[...tempDevices].sort(sortDevices).map((device) => (
+                        {[...tempDevices].map((device) => (
                             <div key={device.id} className="device-item">
                                 <div className="device-header">
                                     <input
@@ -786,7 +800,10 @@ function App() {
                     )}
 
                     {/* 渲染可視化組件 */}
-                    <SceneViewer refreshDeviceData={refreshDeviceData} />
+                    <SceneViewer
+                        devices={tempDevices}
+                        refreshDeviceData={refreshDeviceData}
+                    />
                     <ConstellationViewer />
                 </div>
             </div>
