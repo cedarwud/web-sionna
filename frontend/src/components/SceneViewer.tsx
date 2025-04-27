@@ -1,5 +1,5 @@
 // src/components/SceneViewer.tsx
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 
 // 定義 Props 接口
 interface SceneViewerProps {
@@ -23,6 +23,15 @@ const SceneViewer: React.FC<SceneViewerProps> = () => {
     // 新增重試機制相關狀態
     const [retryCount, setRetryCount] = useState<number>(0)
     const [manualRetryMode, setManualRetryMode] = useState<boolean>(false)
+
+    // 新增滑鼠座標狀態
+    const [mousePosition, setMousePosition] = useState<{
+        x: number
+        y: number
+        clientX: number
+        clientY: number
+    } | null>(null)
+    const imageRef = useRef<HTMLImageElement>(null)
 
     // 檢查空場景圖片是否存在，如果不存在則生成
     // useEffect(() => {
@@ -252,11 +261,40 @@ const SceneViewer: React.FC<SceneViewerProps> = () => {
         setIsLoading(false) // 確保 loading 結束
     }
 
+    // 處理滑鼠移動事件
+    const handleMouseMove = (e: React.MouseEvent<HTMLImageElement>) => {
+        if (imageRef.current) {
+            const rect = imageRef.current.getBoundingClientRect()
+            const x = Math.round(e.clientX - rect.left)
+            const y = Math.round(e.clientY - rect.top)
+
+            // 計算相對於圖片容器的座標
+            const containerX = e.clientX
+            const containerY = e.clientY
+
+            // 正規化座標為圖片實際尺寸的百分比
+            const normalizedX = Math.round((x / rect.width) * 100)
+            const normalizedY = Math.round((y / rect.height) * 100)
+
+            setMousePosition({
+                x,
+                y,
+                clientX: containerX,
+                clientY: containerY,
+            })
+        }
+    }
+
+    // 處理滑鼠離開事件
+    const handleMouseLeave = () => {
+        setMousePosition(null)
+    }
+
     // 使用固定標題
     const title = '場景與路徑 (Etoile)'
 
     return (
-        <div>
+        <div style={{ position: 'relative' }}>
             {isLoading && <p>正在載入圖片...</p>}
             {error && (
                 <div
@@ -284,22 +322,52 @@ const SceneViewer: React.FC<SceneViewerProps> = () => {
                     )}
                 </div>
             )}
+
             {/* 只有在 imageUrl 存在且 loading 完成後才顯示 img，或在 loading 時顯示佔位符 */}
-            {imageUrl && (
-                <img
-                    key={imageUrl} // 使用 key 確保 URL 變化時 img 元素刷新
-                    src={imageUrl}
-                    alt={title}
-                    onLoad={handleImageLoad}
-                    onError={handleImageError}
-                    style={{
-                        maxWidth: '100%',
-                        height: 'auto',
-                        border: '1px solid #ccc',
-                        display: isLoading ? 'none' : 'block', // 可以在 loading 時隱藏
-                    }}
-                />
-            )}
+            <div style={{ position: 'relative' }}>
+                {imageUrl && (
+                    <img
+                        ref={imageRef}
+                        key={imageUrl} // 使用 key 確保 URL 變化時 img 元素刷新
+                        src={imageUrl}
+                        alt={title}
+                        onLoad={handleImageLoad}
+                        onError={handleImageError}
+                        onMouseMove={handleMouseMove}
+                        onMouseLeave={handleMouseLeave}
+                        style={{
+                            maxWidth: '100%',
+                            height: 'auto',
+                            border: '1px solid #ccc',
+                            display: isLoading ? 'none' : 'block', // 可以在 loading 時隱藏
+                            cursor: 'crosshair', // 十字標指針
+                        }}
+                    />
+                )}
+
+                {/* 座標顯示 - 移到這個位置以便正確定位 */}
+                {mousePosition && (
+                    <div
+                        style={{
+                            position: 'fixed', // 使用 fixed 定位相對於視窗
+                            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                            color: 'white',
+                            padding: '2px 6px',
+                            borderRadius: '3px',
+                            fontSize: '12px',
+                            pointerEvents: 'none',
+                            zIndex: 1000,
+                            left: `${mousePosition.clientX}px`,
+                            top: `${mousePosition.clientY - 35}px`,
+                            transform: 'translateX(-50%)', // 只在水平方向居中
+                            whiteSpace: 'nowrap',
+                        }}
+                    >
+                        X: {Math.round((mousePosition.x - 492) / 1.2)}, Y:{' '}
+                        {Math.round((mousePosition.y - 370) / 1.2)}
+                    </div>
+                )}
+            </div>
         </div>
     )
 }
