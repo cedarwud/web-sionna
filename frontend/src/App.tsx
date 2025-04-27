@@ -446,7 +446,16 @@ function App() {
 
     // 處理刪除設備
     const handleDeleteDevice = async (id: number) => {
-        // --- 開始：加入檢查邏輯 ---
+        // 如果是新添加的、未保存的設備 (ID 為負數)
+        if (id < 0) {
+            setTempDevices((prev) => prev.filter((device) => device.id !== id))
+            // 標記有臨時更改，因為我們移除了列表中的一項
+            setHasTempDevices(true)
+            console.log(`已從前端移除臨時設備 ID: ${id}`)
+            return // 直接返回，不執行後續 API 調用
+        }
+
+        // --- 開始：現有設備的檢查邏輯 ---
         // 模擬刪除後的裝置列表
         const devicesAfterDelete = tempDevices.filter(
             (device) => device.id !== id
@@ -460,10 +469,9 @@ function App() {
             )
             return // 阻止執行 API 呼叫
         }
-        // --- 結束：加入檢查邏輯 ---
+        // --- 結束：現有設備的檢查邏輯 ---
 
-        if (apiStatus !== 'connected' && id > 0) {
-            // 只有後端存在的設備才需要API
+        if (apiStatus !== 'connected') {
             setError('無法刪除設備：API連接未建立')
             return
         }
@@ -476,23 +484,27 @@ function App() {
         try {
             setLoading(true)
             setError(null)
-            console.log(`嘗試刪除設備 ID: ${id}`)
-            await deleteDevice(id)
-            console.log(`設備 ID: ${id} 刪除成功，正在重新獲取列表...`)
+            console.log(`調用 API 刪除設備 ID: ${id}`)
+            await deleteDevice(id) // 調用後端刪除 API
+            console.log(`設備 ID: ${id} 刪除成功`)
 
-            // 重新獲取設備列表以反映刪除
-            const updatedBackendDevices = await getDevices()
-            const updatedFrontendDevices = updatedBackendDevices.map(
-                convertBackendToFrontend
+            // 從前端狀態中移除已刪除的設備
+            setDevices((prev) => prev.filter((device) => device.id !== id))
+            setTempDevices((prev) => prev.filter((device) => device.id !== id))
+            setOriginalDevices((prev) =>
+                prev.filter((device) => device.id !== id)
             )
-            setDevices(updatedFrontendDevices)
-            setTempDevices(updatedFrontendDevices)
-            setOriginalDevices(updatedFrontendDevices)
-            console.log('設備列表已更新')
+            // 刪除後，重新檢查是否有未保存的更改
+            setHasTempDevices(
+                JSON.stringify(tempDevices) !== JSON.stringify(originalDevices)
+            )
         } catch (err: any) {
-            console.error(`刪除設備 ID: ${id} 失敗:`, err)
-            const errorMessage = err.message || '未知錯誤'
-            setError(`刪除設備時發生錯誤: ${errorMessage}`)
+            console.error(`刪除設備ID ${id} 失敗:`, err)
+            setError(
+                `刪除設備 ID: ${id} 失敗: ${
+                    err.response?.data?.detail || err.message || '未知錯誤'
+                }`
+            )
         } finally {
             setLoading(false)
         }

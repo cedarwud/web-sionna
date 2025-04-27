@@ -8,9 +8,9 @@ ALTER SEQUENCE device_id_seq RESTART WITH 1;
 
 -- 插入設備數據 - 使用枚舉值而非字符串
 INSERT INTO device (name, device_type, x, y, z, active) VALUES
-('tx_main', 'TRANSMITTER', 0.0, 60.0, 2.0, true),
-('tx_i', 'TRANSMITTER', -100.0, 100.0, 2.0, true),
-('rx', 'RECEIVER', 0.0, 0.0, 1.5, true);
+('tx_1', 'TRANSMITTER', 0.0, 60.0, 2.0, true),
+('int_1', 'TRANSMITTER', -100.0, 100.0, 2.0, true),
+('rx_1', 'RECEIVER', -100.0, 0.0, 1.5, true);
 
 -- 插入發射器數據
 INSERT INTO transmitter (id, transmitter_type)

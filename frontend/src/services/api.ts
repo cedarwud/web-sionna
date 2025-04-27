@@ -127,22 +127,41 @@ export const createDevice = async (deviceData: DeviceCreate): Promise<Device> =>
 // 更新現有設備
 export const updateDevice = async (deviceId: number, deviceData: DeviceUpdate): Promise<Device> => {
   try {
-    // 如果要更新為干擾器類型，使用專門的干擾器API
+    // 如果是干擾器類型，先檢查這個設備是否已經存在並且是干擾器
     if (deviceData.device_type === DeviceType.TRANSMITTER && 
         deviceData.transmitter_type === TransmitterType.INTERFERER) {
-      console.log(`使用干擾器專用API更新設備 ID: ${deviceId}`);
-      // 轉換為後端期望的干擾器格式 - 包含device_type字段
-      const interfererData = {
-        name: deviceData.name,
-        x: deviceData.x,
-        y: deviceData.y, 
-        z: deviceData.z,
-        active: deviceData.active,
-        device_type: DeviceType.TRANSMITTER  // 保留device_type欄位
-      };
-      console.log('干擾器更新數據:', interfererData);
-      const response = await axios.put<Device>(`${API_BASE_URL}/devices/interferer/${deviceId}`, interfererData);
-      return response.data;
+      
+      // 先嘗試獲取此設備信息，檢查它是否已經是干擾器
+      try {
+        const existingDevice = await getDeviceById(deviceId);
+        const isExistingInterferer = existingDevice.device_type === DeviceType.TRANSMITTER && 
+                                     existingDevice.transmitter?.transmitter_type === TransmitterType.INTERFERER;
+        
+        if (isExistingInterferer) {
+          // 確認是干擾器，使用干擾器專用 API
+          console.log(`設備 ID ${deviceId} 確認為干擾器，使用干擾器專用API更新`);
+          const interfererData = {
+            name: deviceData.name,
+            x: deviceData.x,
+            y: deviceData.y, 
+            z: deviceData.z,
+            active: deviceData.active,
+            device_type: DeviceType.TRANSMITTER
+          };
+          const response = await axios.put<Device>(`${API_BASE_URL}/devices/interferer/${deviceId}`, interfererData);
+          return response.data;
+        } else {
+          // 不是現有的干擾器，使用標準 API
+          console.log(`設備 ID ${deviceId} 不是干擾器，使用標準API更新`);
+          const response = await axios.put<Device>(`${API_BASE_URL}/devices/${deviceId}`, deviceData);
+          return response.data;
+        }
+      } catch (error) {
+        // 獲取設備信息失敗，使用標準 API
+        console.log(`獲取設備 ID ${deviceId} 信息失敗，使用標準API更新`);
+        const response = await axios.put<Device>(`${API_BASE_URL}/devices/${deviceId}`, deviceData);
+        return response.data;
+      }
     }
     
     // 一般設備更新

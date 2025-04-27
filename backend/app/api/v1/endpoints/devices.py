@@ -10,6 +10,7 @@ from app.db.models import Device, DeviceType, TransmitterType, Transmitter
 from app.schemas.device import Device as DeviceSchema, DeviceCreate, DeviceUpdate
 from app.schemas.interferer import InterfererCreate, InterfererUpdate, Interferer
 from app.crud import crud_device
+from app.crud.crud_device import update_device_by_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -219,6 +220,7 @@ async def update_existing_device(
     更新一個已存在的設備。
     """
     logger.info(f"API: Received request to update device ID: {device_id}")
+    # 檢查設備是否存在
     db_device = await crud_device.get_device(db=session, device_id=device_id)
     if not db_device:
         raise HTTPException(
@@ -238,10 +240,33 @@ async def update_existing_device(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Another device with this updated name already exists.",
             )
+
+    # 檢查設備類型變更 - 特別處理變更為干擾器的情況
+    is_changing_to_interferer = (
+        device_in.device_type == DeviceType.TRANSMITTER
+        and device_in.transmitter_type == TransmitterType.INTERFERER
+    )
+
     try:
-        updated_device = await crud_device.update_device(
-            db=session, db_obj=db_device, obj_in=device_in
-        )
+        if is_changing_to_interferer:
+            logger.info(f"Converting device ID {device_id} to interferer")
+            # 創建干擾器更新格式
+            interferer_data = InterfererUpdate(
+                name=device_in.name,
+                x=device_in.x,
+                y=device_in.y,
+                z=device_in.z,
+                active=device_in.active,
+            )
+            # 使用update_device_by_id而不是update_interferer_by_id，因為後者會檢查設備已經是干擾器
+            updated_device = await crud_device.update_device_by_id(
+                db=session, device_id=device_id, device_in=device_in
+            )
+        else:
+            # 一般設備更新
+            updated_device = await update_device_by_id(
+                db=session, device_id=device_id, device_in=device_in
+            )
         return DeviceSchema.from_orm(updated_device)
     except Exception as e:
         logger.error(f"API Error updating device ID {device_id}: {e}", exc_info=True)
@@ -262,6 +287,7 @@ async def update_existing_interferer(
     更新一個已存在的干擾源。
     """
     logger.info(f"API: Received request to update interferer ID: {interferer_id}")
+    # 檢查干擾源是否存在
     db_interferer = await crud_device.get_interferer(
         db=session, interferer_id=interferer_id
     )
@@ -283,9 +309,11 @@ async def update_existing_interferer(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Another device with this updated name already exists.",
             )
+
     try:
-        updated_interferer = await crud_device.update_interferer(
-            db=session, db_obj=db_interferer, obj_in=interferer_in
+        # 使用新的update_interferer_by_id函數
+        updated_interferer = await crud_device.update_interferer_by_id(
+            db=session, interferer_id=interferer_id, obj_in=interferer_in
         )
         return DeviceSchema.from_orm(updated_interferer)
     except Exception as e:

@@ -206,20 +206,20 @@ async def get_multi_interferers(
     return result.scalars().unique().all()
 
 
-# --- Update Device ---
-async def update_device(
-    db: AsyncSession, *, db_obj: Device, obj_in: Union[DeviceUpdate, Dict[str, Any]]
+# --- Update Device By ID (避免使用已刪除的對象) ---
+async def update_device_by_id(
+    db: AsyncSession, *, device_id: int, device_in: Union[DeviceUpdate, Dict[str, Any]]
 ) -> Device:
     """
-    更新設備信息。
+    根據ID更新設備信息，避免傳遞可能已刪除的對象。
     """
-    logger.info(f"Attempting to update device ID: {db_obj.id}")
+    logger.info(f"Attempting to update device by ID: {device_id}")
 
     # 將 Pydantic 模型轉換為字典
-    if isinstance(obj_in, dict):
-        update_data = obj_in
+    if isinstance(device_in, dict):
+        update_data = device_in.copy()
     else:
-        update_data = obj_in.dict(exclude_unset=True)
+        update_data = device_in.dict(exclude_unset=True)
 
     # 提取transmitter_type以便稍後使用
     transmitter_type = (
@@ -228,66 +228,181 @@ async def update_device(
         else None
     )
 
+    # 獲取當前設備數據
+    db_device = await get_device(db=db, device_id=device_id)
+    if not db_device:
+        logger.warning(f"Device with ID {device_id} not found for update.")
+        raise ValueError(f"Device with ID {device_id} not found")
+
+    # 獲取並保存完整的設備信息（用於可能需要重建）
+    device_info = {
+        "id": db_device.id,
+        "name": db_device.name,
+        "device_type": db_device.device_type,
+        "x": db_device.x,
+        "y": db_device.y,
+        "z": db_device.z,
+        "active": db_device.active,
+    }
+
+    # 更新device_info中的數據
+    for field, value in update_data.items():
+        device_info[field] = value
+
     # 檢查是否變更了設備類型
     device_type_changed = (
         "device_type" in update_data
-        and update_data["device_type"] != db_obj.device_type
+        and update_data["device_type"] != db_device.device_type
     )
 
-    # 更新 Device 物件
-    for field, value in update_data.items():
-        setattr(db_obj, field, value)
+    # 保存新的設備類型和其他更新數據
+    new_device_type = update_data.get("device_type", db_device.device_type)
 
-    db.add(db_obj)
-    await db.flush()
+    try:
+        # 如果設備類型變更，先處理關聯記錄，不使用額外的事務包裝
+        if device_type_changed:
+            # 1. 刪除現有的關聯記錄
+            if db_device.device_type == DeviceType.RECEIVER:
+                stmt = select(Receiver).where(Receiver.id == device_id)
+                result = await db.execute(stmt)
+                receiver = result.scalar_one_or_none()
+                if receiver:
+                    await db.delete(receiver)
+                    await db.flush()
+            elif db_device.device_type == DeviceType.TRANSMITTER:
+                stmt = select(Transmitter).where(Transmitter.id == device_id)
+                result = await db.execute(stmt)
+                transmitter = result.scalar_one_or_none()
+                if transmitter:
+                    await db.delete(transmitter)
+                    await db.flush()
 
-    # 處理設備類型變更
-    if device_type_changed:
-        # 如果從非發射器變更為發射器
-        if db_obj.device_type == DeviceType.TRANSMITTER:
-            # 檢查是否已經有發射器記錄
-            if hasattr(db_obj, "transmitter") and db_obj.transmitter is not None:
-                # 更新現有發射器記錄的類型
-                if transmitter_type is not None:
-                    db_obj.transmitter.transmitter_type = transmitter_type
+            # 2. 更新設備基本信息
+            stmt = select(Device).where(Device.id == device_id)
+            result = await db.execute(stmt)
+            device = result.scalar_one_or_none()
+
+            if not device:
+                # 設備在刪除關聯記錄後不存在了，需要重新創建
+                logger.warning(
+                    f"Device with ID {device_id} was deleted during update - recreating"
+                )
+                new_device = Device(
+                    id=device_id,
+                    name=device_info["name"],
+                    device_type=device_info["device_type"],
+                    x=device_info["x"],
+                    y=device_info["y"],
+                    z=device_info["z"],
+                    active=device_info["active"],
+                )
+                db.add(new_device)
+                await db.flush()
+                device = new_device
             else:
+                # 更新現有設備
+                for field, value in update_data.items():
+                    setattr(device, field, value)
+
+                db.add(device)
+                await db.flush()
+
+            # 3. 創建新的關聯記錄
+            if new_device_type == DeviceType.TRANSMITTER:
                 # 創建新的發射器記錄
                 tx_type = (
                     transmitter_type
                     if transmitter_type is not None
                     else TransmitterType.SIGNAL
                 )
-                db_transmitter = Transmitter(id=db_obj.id, transmitter_type=tx_type)
+                db_transmitter = Transmitter(id=device_id, transmitter_type=tx_type)
                 db.add(db_transmitter)
-
-        # 如果從發射器變更為接收器
-        elif db_obj.device_type == DeviceType.RECEIVER:
-            # 刪除現有的發射器記錄（如果有）
-            if hasattr(db_obj, "transmitter") and db_obj.transmitter is not None:
-                await db.delete(db_obj.transmitter)
-
-            # 檢查是否已經有接收器記錄
-            if not (hasattr(db_obj, "receiver") and db_obj.receiver is not None):
+            elif new_device_type == DeviceType.RECEIVER:
                 # 創建新的接收器記錄
-                db_receiver = Receiver(id=db_obj.id)
+                db_receiver = Receiver(id=device_id)
                 db.add(db_receiver)
-
-    # 處理發射器類型變更（當設備類型沒變，但發射器類型變了）
-    elif db_obj.device_type == DeviceType.TRANSMITTER and transmitter_type is not None:
-        # 確保發射器記錄存在
-        if hasattr(db_obj, "transmitter") and db_obj.transmitter is not None:
-            db_obj.transmitter.transmitter_type = transmitter_type
         else:
-            # 如果沒有，創建一個
-            db_transmitter = Transmitter(
-                id=db_obj.id, transmitter_type=transmitter_type
-            )
-            db.add(db_transmitter)
+            # 常規更新 - 無設備類型變更
+            # 更新設備基本信息
+            stmt = select(Device).where(Device.id == device_id)
+            result = await db.execute(stmt)
+            device = result.scalar_one_or_none()
 
-    await db.commit()
-    await db.refresh(db_obj)
-    logger.info(f"Successfully updated device ID: {db_obj.id}")
-    return db_obj
+            if not device:
+                # 設備不存在，需要重新創建
+                logger.warning(
+                    f"Device with ID {device_id} not found during update - recreating"
+                )
+                new_device = Device(
+                    id=device_id,
+                    name=device_info["name"],
+                    device_type=device_info["device_type"],
+                    x=device_info["x"],
+                    y=device_info["y"],
+                    z=device_info["z"],
+                    active=device_info["active"],
+                )
+                db.add(new_device)
+                await db.flush()
+                device = new_device
+            else:
+                # 更新現有設備
+                for field, value in update_data.items():
+                    setattr(device, field, value)
+
+                db.add(device)
+                await db.flush()
+
+            # 處理發射器類型變更（當設備類型沒變，但發射器類型變了）
+            if (
+                device.device_type == DeviceType.TRANSMITTER
+                and transmitter_type is not None
+            ):
+                # 查詢發射器記錄
+                stmt = select(Transmitter).where(Transmitter.id == device_id)
+                result = await db.execute(stmt)
+                transmitter = result.scalar_one_or_none()
+
+                if transmitter:
+                    transmitter.transmitter_type = transmitter_type
+                    db.add(transmitter)
+                else:
+                    # 如果沒有，創建一個
+                    db_transmitter = Transmitter(
+                        id=device_id, transmitter_type=transmitter_type
+                    )
+                    db.add(db_transmitter)
+
+        # 提交變更
+        await db.commit()
+
+        # 重新獲取更新後的設備，包括所有關聯的記錄
+        updated_device = await get_device(db=db, device_id=device_id)
+
+        if not updated_device:
+            # 如果在提交後仍無法找到設備，返回根據保存信息重建的設備對象
+            logger.error(f"Device with ID {device_id} could not be found after update")
+            updated_device = Device(
+                id=device_id,
+                name=device_info["name"],
+                device_type=new_device_type,
+                x=device_info["x"],
+                y=device_info["y"],
+                z=device_info["z"],
+                active=device_info["active"],
+            )
+
+        logger.info(f"Successfully updated device by ID: {device_id}")
+        return updated_device
+
+    except Exception as e:
+        logger.error(f"Error updating device ID {device_id}: {e}", exc_info=True)
+        # 嘗試回滾以確保數據庫一致性
+        try:
+            await db.rollback()
+        except:
+            pass
+        raise
 
 
 # --- Update Interferer (整合自 crud_interferer) ---
@@ -295,39 +410,60 @@ async def update_interferer(
     db: AsyncSession, *, db_obj: Device, obj_in: InterfererUpdate
 ) -> Device:
     """
-    更新一個干擾源設備。
-    注意：Transmitter 表目前沒有可更新的特定於干擾源的欄位。
-         如果未來添加了，需要同時更新 Transmitter 記錄。
+    更新一個干擾源設備（兼容性版本）。
     """
-    logger.info(f"Attempting to update interferer ID: {db_obj.id}")
-    # 直接使用通用的 update_device 函數
-    return await update_device(db=db, db_obj=db_obj, obj_in=obj_in)
+    logger.info(
+        f"Attempting to update interferer ID: {db_obj.id} using compatibility function"
+    )
+    # 使用新的by_id版本
+    return await update_interferer_by_id(db=db, interferer_id=db_obj.id, obj_in=obj_in)
 
 
 # --- Delete Device ---
 async def remove_device(db: AsyncSession, *, device_id: int) -> Optional[Device]:
     """
     根據 ID 刪除一個設備。
-    由於外鍵關係設置為 ON DELETE CASCADE，相關的 Transmitter 或 Receiver 記錄會自動刪除。
+    先刪除相關的 Transmitter 或 Receiver 記錄，然後再刪除 Device 記錄。
     """
     logger.info(f"Attempting to delete device ID: {device_id}")
-    # 先獲取物件以便返回
+
+    # 先獲取並複製設備信息以便返回
     db_obj = await get_device(db, device_id)
-    if db_obj:
-        # 檢查並處理可能的 transmitter 和 receiver 關係
-        if hasattr(db_obj, "transmitter") and db_obj.transmitter is not None:
-            await db.delete(db_obj.transmitter)
+    if not db_obj:
+        logger.warning(f"Device with ID {device_id} not found for deletion.")
+        return None
+
+    # 保存返回數據的副本
+    device_copy = Device(
+        id=db_obj.id,
+        name=db_obj.name,
+        device_type=db_obj.device_type,
+        x=db_obj.x,
+        y=db_obj.y,
+        z=db_obj.z,
+        active=db_obj.active,
+    )
+
+    try:
+        # 檢查並先刪除 receiver 關係
         if hasattr(db_obj, "receiver") and db_obj.receiver is not None:
             await db.delete(db_obj.receiver)
+            await db.flush()
+
+        # 檢查並刪除 transmitter 關係
+        if hasattr(db_obj, "transmitter") and db_obj.transmitter is not None:
+            await db.delete(db_obj.transmitter)
+            await db.flush()
 
         # 最後刪除 device 本身
         await db.delete(db_obj)
         await db.commit()
         logger.info(f"Successfully deleted device ID: {device_id}")
-        return db_obj
-    else:
-        logger.warning(f"Device with ID {device_id} not found for deletion.")
-        return None
+        return device_copy
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error deleting device ID {device_id}: {e}", exc_info=True)
+        raise
 
 
 # --- Delete Interferer (整合自 crud_interferer) ---
@@ -336,19 +472,44 @@ async def remove_interferer(
 ) -> Optional[Device]:
     """
     根據 ID 刪除一個干擾源設備。
-    由於 Transmitter 表的外鍵設定了 ON DELETE CASCADE，相關的 Transmitter 記錄會自動刪除。
+    先確保存在且類型正確，然後執行刪除。
     """
     logger.info(f"Attempting to delete interferer ID: {interferer_id}")
-    # 先獲取物件以便返回，同時確認存在且類型正確
+
+    # 先獲取並複製設備信息以便返回，同時確認存在且類型正確
     db_obj = await get_interferer(db, interferer_id)
-    if db_obj:
+    if not db_obj:
+        logger.warning(f"Interferer with ID {interferer_id} not found for deletion.")
+        return None
+
+    # 保存返回數據的副本
+    device_copy = Device(
+        id=db_obj.id,
+        name=db_obj.name,
+        device_type=db_obj.device_type,
+        x=db_obj.x,
+        y=db_obj.y,
+        z=db_obj.z,
+        active=db_obj.active,
+    )
+
+    try:
+        # 先刪除發射器記錄
+        if hasattr(db_obj, "transmitter") and db_obj.transmitter is not None:
+            await db.delete(db_obj.transmitter)
+            await db.flush()
+
+        # 然後刪除設備記錄
         await db.delete(db_obj)
         await db.commit()
         logger.info(f"Successfully deleted interferer ID: {interferer_id}")
-        return db_obj
-    else:
-        logger.warning(f"Interferer with ID {interferer_id} not found for deletion.")
-        return None
+        return device_copy
+    except Exception as e:
+        await db.rollback()
+        logger.error(
+            f"Error deleting interferer ID {interferer_id}: {e}", exc_info=True
+        )
+        raise
 
 
 # --- 額外輔助函數 ---
@@ -437,3 +598,39 @@ async def get_active_devices_by_type(
         receivers = list(rx_result.scalars().unique().all())
 
     return transmitters, receivers
+
+
+# --- Update Interferer By ID ---
+async def update_interferer_by_id(
+    db: AsyncSession, *, interferer_id: int, obj_in: InterfererUpdate
+) -> Device:
+    """
+    根據ID更新干擾源設備信息，避免傳遞可能已刪除的對象。
+    """
+    logger.info(f"Attempting to update interferer by ID: {interferer_id}")
+
+    # 轉換為設備更新格式
+    device_update_data = obj_in.dict(exclude_unset=True)
+    # 確保設備類型為發射器
+    device_update_data["device_type"] = DeviceType.TRANSMITTER
+    # 設置發射器類型為干擾器
+    device_update_data["transmitter_type"] = TransmitterType.INTERFERER
+
+    # 使用通用的update_device_by_id函數
+    return await update_device_by_id(
+        db=db, device_id=interferer_id, device_in=device_update_data
+    )
+
+
+# --- Update Device ---
+async def update_device(
+    db: AsyncSession, *, db_obj: Device, obj_in: Union[DeviceUpdate, Dict[str, Any]]
+) -> Device:
+    """
+    更新設備信息（兼容性版本）。
+    """
+    logger.info(
+        f"Attempting to update device ID: {db_obj.id} using compatibility function"
+    )
+    # 調用新的by_id版本
+    return await update_device_by_id(db=db, device_id=db_obj.id, device_in=obj_in)
