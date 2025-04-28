@@ -271,10 +271,22 @@ async def generate_scene_with_paths_image(
         scene.render(camera=my_cam, paths=paths, resolution=[800, 600], num_samples=128)
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        plt.savefig(output_path, bbox_inches="tight", pad_inches=0, dpi=150)
-        plt.close(fig)
-        logger.info(f"Scene with paths rendered and saved to: {output_path}")
-        return True
+        try:
+            logger.info(f"Saving scene with paths directly to: {output_path}")
+            plt.savefig(output_path, bbox_inches="tight", pad_inches=0, dpi=150)
+            plt.close(fig)
+            
+            # 確認文件確實存在且不為空
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                logger.info(f"Successfully saved scene image to {output_path}, size: {os.path.getsize(output_path)} bytes")
+                return True
+            else:
+                logger.error(f"Failed to generate scene image or image is empty: {output_path}")
+                return False
+        except Exception as save_err:
+            logger.error(f"Error saving scene image to {output_path}: {save_err}", exc_info=True)
+            plt.close(fig)  # 確保關閉圖表
+            return False
 
     except Exception as e:
         logger.error(f"Error in generate_scene_with_paths_image: {e}", exc_info=True)
@@ -547,55 +559,23 @@ async def generate_constellation_plot(
         # --- 使用臨時文件保存 ---
         # 確保目標目錄存在
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        # 創建臨時文件 (delete=False 使得我們可以手動移動它)
-        with tempfile.NamedTemporaryFile(
-            suffix=".png", delete=False, dir=os.path.dirname(output_path)
-        ) as temp_f:
-            temp_file_path = temp_f.name
-            logger.info(
-                f"Saving constellation diagram to temporary file: {temp_file_path}"
-            )
-            plt.savefig(temp_file_path, bbox_inches="tight", dpi=100)
-        plt.close(fig)  # 在保存後關閉圖表
 
-        # 檢查臨時文件是否成功創建且不為空
-        if (
-            temp_file_path
-            and os.path.exists(temp_file_path)
-            and os.path.getsize(temp_file_path) > 0
-        ):
-            logger.info(f"Temporary file {temp_file_path} created successfully.")
-            # 原子地移動臨時文件到最終目標路徑
-            try:
-                shutil.move(temp_file_path, output_path)
-                logger.info(f"Moved temporary file to final destination: {output_path}")
+        # 直接保存到最終輸出路徑，避免臨時文件處理帶來的問題
+        try:
+            logger.info(f"Saving constellation diagram directly to: {output_path}")
+            plt.savefig(output_path, bbox_inches="tight", dpi=100)
+            plt.close(fig)  # 在保存後關閉圖表
+            
+            # 確認文件確實存在且不為空
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                logger.info(f"Successfully saved image to {output_path}, size: {os.path.getsize(output_path)} bytes")
                 return True
-            except Exception as move_err:
-                logger.error(
-                    f"Error moving temporary file {temp_file_path} to {output_path}: {move_err}",
-                    exc_info=True,
-                )
-                # 嘗試清理臨時文件
-                if os.path.exists(temp_file_path):
-                    try:
-                        os.remove(temp_file_path)
-                    except OSError as remove_err:
-                        logger.warning(
-                            f"Could not remove temporary file {temp_file_path} after move error: {remove_err}"
-                        )
+            else:
+                logger.error(f"Failed to generate image or image is empty: {output_path}")
                 return False
-        else:
-            logger.error(
-                f"Failed to save to temporary file or generated empty file: {temp_file_path}"
-            )
-            # 嘗試清理臨時文件
-            if temp_file_path and os.path.exists(temp_file_path):
-                try:
-                    os.remove(temp_file_path)
-                except OSError as remove_err:
-                    logger.warning(
-                        f"Could not remove potentially empty temporary file {temp_file_path}: {remove_err}"
-                    )
+        except Exception as save_err:
+            logger.error(f"Error saving image to {output_path}: {save_err}", exc_info=True)
+            plt.close(fig)  # 確保關閉圖表
             return False
 
     except Exception as e:
@@ -630,10 +610,22 @@ def generate_empty_scene_image(output_path: str):
 
         # Ensure the directory exists before saving
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        plt.savefig(output_path, bbox_inches="tight", pad_inches=0, dpi=150)
-        plt.close(fig)
-        logger.info(f"Empty scene image saved to: {output_path}")
-        return True
+        try:
+            logger.info(f"Saving empty scene directly to: {output_path}")
+            plt.savefig(output_path, bbox_inches="tight", pad_inches=0, dpi=150)
+            plt.close(fig)
+            
+            # 確認文件確實存在且不為空
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                logger.info(f"Successfully saved empty scene image to {output_path}, size: {os.path.getsize(output_path)} bytes")
+                return True
+            else:
+                logger.error(f"Failed to generate empty scene image or image is empty: {output_path}")
+                return False
+        except Exception as save_err:
+            logger.error(f"Error saving empty scene image to {output_path}: {save_err}", exc_info=True)
+            plt.close(fig)  # 確保關閉圖表
+            return False
     except Exception as e:
         logger.error(f"Error generating empty scene image: {e}", exc_info=True)
         plt.close("all")

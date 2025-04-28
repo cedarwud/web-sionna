@@ -1,7 +1,7 @@
 import logging
 import os
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session  # Import dependency
@@ -26,8 +26,23 @@ async def get_scene_image_rt_endpoint(session: AsyncSession = Depends(get_sessio
     logger.info("--- API Request: /scene-image-rt ---")
     if await generate_scene_with_paths_image(SCENE_WITH_PATHS_IMAGE_PATH, session):
         if os.path.exists(SCENE_WITH_PATHS_IMAGE_PATH):
-            logger.info(f"Returning FileResponse for {SCENE_WITH_PATHS_IMAGE_PATH}")
-            return FileResponse(SCENE_WITH_PATHS_IMAGE_PATH, media_type="image/png")
+            file_size = os.path.getsize(SCENE_WITH_PATHS_IMAGE_PATH)
+            logger.info(f"Returning image for {SCENE_WITH_PATHS_IMAGE_PATH} (Size: {file_size} bytes)")
+            
+            # 使用StreamingResponse從文件流直接返回
+            def iterfile():
+                with open(SCENE_WITH_PATHS_IMAGE_PATH, "rb") as f:
+                    # 每次讀取4KB
+                    chunk = f.read(4096)
+                    while chunk:
+                        yield chunk
+                        chunk = f.read(4096)
+            
+            return StreamingResponse(
+                iterfile(), 
+                media_type="image/png",
+                headers={"Content-Disposition": f"attachment; filename=scene_with_paths.png"}
+            )
         else:
             logger.error(
                 f"File not found after generation: {SCENE_WITH_PATHS_IMAGE_PATH}"
@@ -52,8 +67,23 @@ async def get_constellation_diagram_endpoint(
         CONSTELLATION_IMAGE_PATH, session
     ):  # Pass session
         if os.path.exists(CONSTELLATION_IMAGE_PATH):
-            logger.info(f"Returning FileResponse for {CONSTELLATION_IMAGE_PATH}")
-            return FileResponse(CONSTELLATION_IMAGE_PATH, media_type="image/png")
+            file_size = os.path.getsize(CONSTELLATION_IMAGE_PATH)
+            logger.info(f"Returning image for {CONSTELLATION_IMAGE_PATH} (Size: {file_size} bytes)")
+            
+            # 使用StreamingResponse從文件流直接返回
+            def iterfile():
+                with open(CONSTELLATION_IMAGE_PATH, "rb") as f:
+                    # 每次讀取4KB
+                    chunk = f.read(4096)
+                    while chunk:
+                        yield chunk
+                        chunk = f.read(4096)
+            
+            return StreamingResponse(
+                iterfile(), 
+                media_type="image/png",
+                headers={"Content-Disposition": f"attachment; filename=constellation_diagram.png"}
+            )
         else:
             logger.error(f"File not found after generation: {CONSTELLATION_IMAGE_PATH}")
             raise HTTPException(

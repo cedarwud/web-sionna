@@ -32,8 +32,8 @@ const ConstellationViewer: React.FC = () => {
     const controllerRef = useRef<AbortController | null>(null)
 
     // 直接使用備用圖像，避免API請求
-    const loadFallbackDirectly = useCallback(async () => {
-        console.log('直接載入備用圖像，跳過API請求')
+    const loadFallbackDirectly = useCallback(async (): Promise<boolean> => {
+        console.log('直接載入備用圖像...')
         setIsLoading(true)
 
         try {
@@ -64,18 +64,12 @@ const ConstellationViewer: React.FC = () => {
             setImageUrl(fallbackUrl)
             prevImageUrlRef.current = fallbackUrl
             setUsingFallback(true)
+            setIsLoading(false)
+            return true
         } catch (error) {
             console.error('載入備用圖像失敗:', error)
-            // 最後嘗試直接設置路徑
-            setImageUrl(FALLBACK_IMAGE_PATH)
-            setUsingFallback(true)
-            setError(
-                `備用圖像載入失敗: ${
-                    error instanceof Error ? error.message : '未知錯誤'
-                }`
-            )
-        } finally {
             setIsLoading(false)
+            return false
         }
     }, [])
 
@@ -88,11 +82,17 @@ const ConstellationViewer: React.FC = () => {
                 return
             }
 
-            // 如果設置為直接使用備用圖像，則跳過API請求
             if (USE_DIRECT_FALLBACK && retryCount === 0) {
-                console.log('已設置為直接使用備用圖像，跳過API請求')
-                await loadFallbackDirectly()
-                return
+                console.log('嘗試直接載入備用圖像...')
+                const fallbackLoaded = await loadFallbackDirectly()
+                if (fallbackLoaded) {
+                    console.log('備用圖像載入成功，跳過API請求')
+                    isFetchingRef.current = false
+                    return
+                } else {
+                    console.log('備用圖像載入失敗，繼續嘗試 API...')
+                    setError(null)
+                }
             }
 
             isFetchingRef.current = true
@@ -183,14 +183,57 @@ const ConstellationViewer: React.FC = () => {
                 if ((error as Error).name !== 'AbortError') {
                     console.error('星座圖載入失敗:', error)
 
-                    // 直接使用備用圖像
-                    await loadFallbackDirectly()
-
-                    setError(
-                        `使用備用星座圖: ${
-                            error instanceof Error ? error.message : '未知錯誤'
-                        }`
-                    )
+                    // 如果設置為直接使用備用圖像，則跳過API請求
+                    if (USE_DIRECT_FALLBACK && retryCount === 0) {
+                        console.log('API 請求失敗，嘗試最後載入靜態備用圖...')
+                        const fallbackSuccess = await loadFallbackDirectly()
+                        if (fallbackSuccess) {
+                            setError(
+                                `API 請求失敗，已載入備用星座圖: ${
+                                    error instanceof Error
+                                        ? error.message
+                                        : '未知錯誤'
+                                }`
+                            )
+                        } else {
+                            // 如果連備用圖都載入失敗
+                            setError(
+                                `API 和備用星座圖均載入失敗: ${
+                                    error instanceof Error
+                                        ? error.message
+                                        : '未知錯誤'
+                                }`
+                            )
+                            // 最後手段，嘗試設置靜態路徑，儘管它可能也會失敗
+                            setImageUrl(FALLBACK_IMAGE_PATH)
+                            setUsingFallback(true)
+                        }
+                    } else {
+                        // 直接使用備用圖像 - 改為調用 loadFallbackDirectly，如果失敗，則設置錯誤狀態
+                        console.log('API 請求失敗，嘗試最後載入靜態備用圖...')
+                        const fallbackSuccess = await loadFallbackDirectly()
+                        if (fallbackSuccess) {
+                            setError(
+                                `API 請求失敗，已載入備用星座圖: ${
+                                    error instanceof Error
+                                        ? error.message
+                                        : '未知錯誤'
+                                }`
+                            )
+                        } else {
+                            // 如果連備用圖都載入失敗
+                            setError(
+                                `API 和備用星座圖均載入失敗: ${
+                                    error instanceof Error
+                                        ? error.message
+                                        : '未知錯誤'
+                                }`
+                            )
+                            // 最後手段，嘗試設置靜態路徑，儘管它可能也會失敗
+                            setImageUrl(FALLBACK_IMAGE_PATH)
+                            setUsingFallback(true)
+                        }
+                    }
 
                     // Retry logic only for non-AbortErrors
                     const currentRetryCount = retryCount + 1
@@ -355,9 +398,11 @@ const ConstellationViewer: React.FC = () => {
                         width: '100%',
                         height: 'auto',
                         border: '1px solid #ccc',
+                        display: isLoading || !imageUrl ? 'none' : 'block',
                     }}
                 />
             )}
+            {isLoading && !imageUrl && <p>正在載入星座圖...</p>}
         </div>
     )
 }

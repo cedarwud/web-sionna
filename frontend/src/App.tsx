@@ -2,6 +2,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import SceneViewer from './components/SceneViewer'
 import ConstellationViewer from './components/ConstellationViewer'
+import Layout from './components/Layout'
+import Sidebar from './components/Sidebar'
 import './App.css'
 import {
     Device as BackendDevice,
@@ -14,7 +16,7 @@ import {
 } from './services/api'
 
 // 前端設備類型（簡化版）
-type DeviceType = 'tx' | 'rx' | 'int'
+export type DeviceType = 'tx' | 'rx' | 'int'
 
 // 前端設備介面
 export interface Device {
@@ -99,7 +101,6 @@ const countActiveDevices = (
 }
 
 function App() {
-    const [devices, setDevices] = useState<Device[]>([])
     const [tempDevices, setTempDevices] = useState<Device[]>([])
     const [originalDevices, setOriginalDevices] = useState<Device[]>([])
     const [loading, setLoading] = useState<boolean>(true)
@@ -121,7 +122,6 @@ function App() {
 
             const frontendDevices = backendDevices.map(convertBackendToFrontend)
 
-            setDevices(frontendDevices)
             setTempDevices(frontendDevices)
             setOriginalDevices(frontendDevices)
             setError(null)
@@ -145,7 +145,6 @@ function App() {
                     type: ['tx', 'rx', 'int'][i % 3] as DeviceType,
                 })
             )
-            setDevices(defaultDevices)
             setTempDevices(defaultDevices)
             setOriginalDevices(defaultDevices)
         } finally {
@@ -333,7 +332,6 @@ function App() {
             const updatedFrontendDevices = updatedBackendDevices.map(
                 convertBackendToFrontend
             )
-            setDevices(updatedFrontendDevices)
             setTempDevices(updatedFrontendDevices)
             setOriginalDevices(updatedFrontendDevices) // 更新原始狀態為最新已保存狀態
             // 重置臨時設備標記
@@ -506,7 +504,6 @@ function App() {
             console.log(`設備 ID: ${id} 刪除成功`)
 
             // 從前端狀態中移除已刪除的設備
-            setDevices((prev) => prev.filter((device) => device.id !== id))
             setTempDevices((prev) => prev.filter((device) => device.id !== id))
             setOriginalDevices((prev) =>
                 prev.filter((device) => device.id !== id)
@@ -581,232 +578,56 @@ function App() {
         console.log('已在前端創建臨時設備:', newDevice)
     }
 
-    // --- 新增排序函式 ---
-    const sortDevices = (a: Device, b: Device): number => {
-        // 1. 按類型排序 (tx < rx < int)
-        const typeOrder: { [key in DeviceType]: number } = {
-            tx: 1,
-            rx: 2,
-            int: 3,
-        }
-        if (typeOrder[a.type] !== typeOrder[b.type]) {
-            return typeOrder[a.type] - typeOrder[b.type]
-        }
-
-        // 2. 如果類型相同，按名稱中的數字後綴排序
-        const extractNumber = (name: string): number => {
-            // 假設名稱格式為 "prefix-number"
-            const match = name.match(/-(\d+)$/)
-            return match ? parseInt(match[1], 10) : Infinity // 無法解析的數字排在後面
-        }
-        const numA = extractNumber(a.name)
-        const numB = extractNumber(b.name)
-
-        return numA - numB
-    }
-    // --- 結束排序函式 ---
-
     if (loading) {
         return <div className="loading">載入中...</div>
     }
 
+    const sidebarContent = (
+        <Sidebar
+            tempDevices={tempDevices}
+            apiStatus={apiStatus}
+            error={error}
+            selectedScene={selectedScene}
+            hasTempDevices={hasTempDevices}
+            handleApply={handleApply}
+            handleCancel={handleCancel}
+            handleSceneChange={handleSceneChange}
+            handleDeviceChange={handleDeviceChange}
+            handleDeleteDevice={handleDeleteDevice}
+            handleAddDevice={handleAddDevice}
+        />
+    )
+
+    const mainContent = (
+        <>
+            {/* 顯示警告訊息，如果有臨時設備 */}
+            {hasTempDevices && (
+                <div
+                    className="warning-message"
+                    style={{
+                        color: 'orange',
+                        padding: '10px',
+                        textAlign: 'center',
+                    }}
+                >
+                    您有未保存的設備更改。請點擊 Apply 按鈕保存更改並更新圖像。
+                </div>
+            )}
+
+            {/* 渲染可視化組件 */}
+            <SceneViewer
+                devices={tempDevices}
+                refreshDeviceData={refreshDeviceData}
+            />
+            <ConstellationViewer />
+        </>
+    )
+
     return (
         <div className="App">
-            <div className="app-container">
-                <div className="sidebar">
-                    <div className="sidebar-header">
-                        <div className="button-group">
-                            <button
-                                onClick={handleApply}
-                                disabled={apiStatus !== 'connected'}
-                            >
-                                Apply
-                            </button>
-                            <button onClick={handleCancel}>Cancel</button>
-                        </div>
-                        <div className="scene-selector">
-                            <select
-                                value={selectedScene}
-                                onChange={handleSceneChange}
-                            >
-                                <option value="Etoile">Etoile</option>
-                                <option value="國立陽明交通大學">
-                                    國立陽明交通大學
-                                </option>
-                                <option value="國立臺北大學">
-                                    國立臺北大學
-                                </option>
-                            </select>
-                        </div>
-                    </div>
-                    {error && <div className="error-message">{error}</div>}
-                    <div className="devices-list">
-                        {[...tempDevices].map((device) => (
-                            <div key={device.id} className="device-item">
-                                <div className="device-header">
-                                    <input
-                                        type="text"
-                                        value={device.name}
-                                        onChange={(e) =>
-                                            handleDeviceChange(
-                                                device.id,
-                                                'name',
-                                                e.target.value
-                                            )
-                                        }
-                                        className="device-name-input"
-                                    />
-                                    <button
-                                        className="delete-btn"
-                                        onClick={() =>
-                                            handleDeleteDevice(device.id)
-                                        }
-                                    >
-                                        &#10006;
-                                    </button>
-                                </div>
-                                <div className="device-content">
-                                    <table className="device-table">
-                                        <thead>
-                                            <tr>
-                                                <th></th>
-                                                <th>Type</th>
-                                                <th>X</th>
-                                                <th>Y</th>
-                                                <th>Z</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr>
-                                                <td>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={device.active}
-                                                        onChange={(e) =>
-                                                            handleDeviceChange(
-                                                                device.id,
-                                                                'active',
-                                                                e.target.checked
-                                                            )
-                                                        }
-                                                    />
-                                                </td>
-                                                <td>
-                                                    <select
-                                                        value={device.type}
-                                                        onChange={(e) =>
-                                                            handleDeviceChange(
-                                                                device.id,
-                                                                'type',
-                                                                e.target
-                                                                    .value as DeviceType
-                                                            )
-                                                        }
-                                                    >
-                                                        <option value="tx">
-                                                            Tx
-                                                        </option>
-                                                        <option value="rx">
-                                                            Rx
-                                                        </option>
-                                                        <option value="int">
-                                                            Int
-                                                        </option>
-                                                    </select>
-                                                </td>
-                                                <td>
-                                                    <input
-                                                        type="number"
-                                                        value={device.x}
-                                                        onChange={(e) =>
-                                                            handleDeviceChange(
-                                                                device.id,
-                                                                'x',
-                                                                parseFloat(
-                                                                    e.target
-                                                                        .value
-                                                                ) || 0
-                                                            )
-                                                        }
-                                                    />
-                                                </td>
-                                                <td>
-                                                    <input
-                                                        type="number"
-                                                        value={device.y}
-                                                        onChange={(e) =>
-                                                            handleDeviceChange(
-                                                                device.id,
-                                                                'y',
-                                                                parseFloat(
-                                                                    e.target
-                                                                        .value
-                                                                ) || 0
-                                                            )
-                                                        }
-                                                    />
-                                                </td>
-                                                <td>
-                                                    <input
-                                                        type="number"
-                                                        value={device.z.toFixed(
-                                                            1
-                                                        )}
-                                                        step="0.1"
-                                                        onChange={(e) =>
-                                                            handleDeviceChange(
-                                                                device.id,
-                                                                'z',
-                                                                parseFloat(
-                                                                    parseFloat(
-                                                                        e.target
-                                                                            .value
-                                                                    ).toFixed(1)
-                                                                ) || 0
-                                                            )
-                                                        }
-                                                    />
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                    <div className="add-device-container">
-                        <button
-                            onClick={handleAddDevice}
-                            className="add-device-btn"
-                        >
-                            Add
-                        </button>
-                    </div>
-                </div>
-                <div className="main-content">
-                    {/* 顯示警告訊息，如果有臨時設備 */}
-                    {hasTempDevices && (
-                        <div
-                            className="warning-message"
-                            style={{
-                                color: 'orange',
-                                padding: '10px',
-                                textAlign: 'center',
-                            }}
-                        >
-                            您有未保存的設備更改。請點擊 Apply
-                            按鈕保存更改並更新圖像。
-                        </div>
-                    )}
-
-                    {/* 渲染可視化組件 */}
-                    <SceneViewer
-                        devices={tempDevices}
-                        refreshDeviceData={refreshDeviceData}
-                    />
-                    <ConstellationViewer />
-                </div>
-            </div>
+            <Layout sidebar={sidebarContent} defaultCollapsed={true}>
+                {mainContent}
+            </Layout>
         </div>
     )
 }

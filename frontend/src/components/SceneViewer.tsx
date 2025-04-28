@@ -37,7 +37,6 @@ interface NewDevice {
 
 // 定義靜態路徑指向後端存儲的最後一次成功渲染的圖像
 const FALLBACK_IMAGE_PATH = '/rendered_images/scene_with_paths.png'
-const EMPTY_SCENE_IMAGE_PATH = '/rendered_images/empty_scene.png'
 
 // 使用 React.memo 包裝組件以避免不必要的重新渲染
 const SceneViewer: React.FC<SceneViewerProps> = React.memo(
@@ -94,9 +93,6 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         const [error, setError] = useState<string | null>(null)
         const prevImageUrlRef = useRef<string | null>(null) // 使用 ref 存儲上一個 URL
         const [usingFallback, setUsingFallback] = useState<boolean>(false)
-        const [loadingPlaceholder, setLoadingPlaceholder] = useState<
-            string | null
-        >(null)
         const [retryCount, setRetryCount] = useState<number>(0)
         const [manualRetryMode, setManualRetryMode] = useState<boolean>(false)
 
@@ -220,13 +216,6 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                     URL.revokeObjectURL(prevImageUrlRef.current)
                     prevImageUrlRef.current = null // 清理 ref
                     console.log('Revoked previous object URL from ref')
-                }
-
-                // 如果存在空場景圖片，則在加載過程中顯示它
-                if (loadingPlaceholder) {
-                    setImageUrl(loadingPlaceholder)
-                } else {
-                    setImageUrl(null)
                 }
 
                 const endpointWithCacheBuster = `${rtEndpoint}?t=${new Date().getTime()}`
@@ -389,20 +378,8 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                     setIsLoading(false)
                 }
             },
-            [loadingPlaceholder, retryCount]
+            [retryCount]
         )
-
-        // 處理手動重試
-        const handleRetry = useCallback(() => {
-            console.log('手動重試載入圖片...')
-            setRetryCount(0)
-            setManualRetryMode(false)
-            // 手動重試時，創建新的 AbortController
-            const controller = new AbortController()
-            fetchImage(controller.signal)
-            // 注意：這裡的 abort 需要額外處理，或者簡化 retry 邏輯
-            // 暫時的簡化：手動重試不設超時 abort，依賴瀏覽器默認或後端超時
-        }, [fetchImage])
 
         const handleImageLoad = useCallback(() => {
             console.log(`Image element loaded successfully: ${imageUrl}`)
@@ -839,33 +816,6 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         return (
             <div style={{ position: 'relative' }}>
                 {isLoading && <p>正在載入路徑圖...</p>}
-                {error && (
-                    <div
-                        style={{
-                            color: usingFallback ? 'orange' : 'red',
-                            marginBottom: '10px',
-                        }}
-                    >
-                        <p>狀態: {error}</p>
-                        {manualRetryMode && (
-                            <button
-                                onClick={handleRetry}
-                                style={{
-                                    padding: '5px 10px',
-                                    marginTop: '5px',
-                                    background: '#4CAF50',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                重試載入
-                            </button>
-                        )}
-                    </div>
-                )}
-
                 {/* 只有在 imageUrl 存在且 loading 完成後才顯示 img，或在 loading 時顯示佔位符 */}
                 <div style={{ position: 'relative' }}>
                     {imageUrl && (
@@ -1219,10 +1169,6 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                 >
                                     Apply
                                 </button>
-
-                                {/* Delete Button (已移除) */}
-                                {/* {isEditing && (...)} */}
-
                                 {/* Cancel Button (通用) */}
                                 <button
                                     onClick={handleClosePopover} // 這個 Cancel 按鈕維持關閉功能
