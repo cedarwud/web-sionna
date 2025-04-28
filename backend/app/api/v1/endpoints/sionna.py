@@ -181,33 +181,6 @@ async def get_constellation_diagram_endpoint(
         )
 
 
-# 新增：檢查並生成空場景圖片的端點
-@router.get("/check-empty-scene", tags=["Sionna Simulation"])
-async def check_empty_scene_endpoint():
-    """檢查是否有空場景圖片，如果沒有則生成"""
-    logger.info("--- API Request: /check-empty-scene ---")
-
-    if os.path.exists(EMPTY_SCENE_IMAGE_PATH):
-        logger.info(f"空場景圖片已存在於 {EMPTY_SCENE_IMAGE_PATH}")
-        return {
-            "status": "success",
-            "message": "空場景圖片已存在",
-            "path": f"/rendered_images/empty_scene.png",
-        }
-
-    logger.info("空場景圖片不存在，開始生成")
-    if generate_empty_scene_image(EMPTY_SCENE_IMAGE_PATH):
-        logger.info(f"空場景圖片已生成於 {EMPTY_SCENE_IMAGE_PATH}")
-        return {
-            "status": "success",
-            "message": "空場景圖片已生成",
-            "path": f"/rendered_images/empty_scene.png",
-        }
-    else:
-        logger.error("生成空場景圖片時發生錯誤")
-        raise HTTPException(status_code=500, detail="生成空場景圖片時發生錯誤")
-
-
 # 新增：提供 GLB 模型的端點
 @router.get("/scene", tags=["Sionna Scene"])
 async def get_scene_glb():
