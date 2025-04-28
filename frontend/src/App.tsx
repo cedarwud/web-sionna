@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import SceneViewer from './components/SceneViewer'
 import ConstellationViewer from './components/ConstellationViewer'
+import SceneView from './components/SceneView'
 import Layout from './components/Layout'
 import Sidebar from './components/Sidebar'
 import './App.css'
@@ -613,8 +614,8 @@ function App() {
                     您有未保存的設備更改。請點擊 Apply 按鈕保存更改並更新圖像。
                 </div>
             )}
-
             {/* 渲染可視化組件 */}
+            <SceneView />
             <SceneViewer
                 devices={tempDevices}
                 refreshDeviceData={refreshDeviceData}

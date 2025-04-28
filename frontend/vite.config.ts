@@ -17,14 +17,18 @@ export default defineConfig({
             '/api': {
                 target: 'http://fastapi:8000', // 您的後端 API 伺服器地址
                 changeOrigin: true, // 建議開啟，會修改請求頭中的 Host 字段為目標 URL，有助於處理某些後端的虛擬主機或安全配置
-                // rewrite: (path) => path.replace(/^\/api/, '') // 只有當後端 API 路徑本身不包含 /api 前綴時才需要使用 rewrite
-                // 在您的情況下，後端是 @app.get("/api/scene-image")，所以通常不需要 rewrite
+                // rewrite: (path) => path.replace(/^\/api/, '') // 移除 /api 前綴，因為後端路由沒有這個前綴
             },
             // 增加對靜態文件的代理
             '/rendered_images': {
                 target: 'http://fastapi:8000',
                 changeOrigin: true,
             },
+            // 其他靜態資源路徑
+            '/static': {
+                target: 'http://fastapi:8000',
+                changeOrigin: true,
+            }
         },
     },
 })

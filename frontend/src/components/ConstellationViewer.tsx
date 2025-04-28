@@ -209,7 +209,7 @@ const ConstellationViewer: React.FC = () => {
                             setUsingFallback(true)
                         }
                     } else {
-                        // 直接使用備用圖像 - 改為調用 loadFallbackDirectly，如果失敗，則設置錯誤狀態
+                        // 直接使用備用圖像 - 改为调用 loadFallbackDirectly，如果失敗，則設置錯誤狀態
                         console.log('API 請求失敗，嘗試最後載入靜態備用圖...')
                         const fallbackSuccess = await loadFallbackDirectly()
                         if (fallbackSuccess) {
@@ -358,7 +358,7 @@ const ConstellationViewer: React.FC = () => {
     }
 
     return (
-        <div>
+        <div className="constellation-container" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
             <h2>Constellation Diagram</h2>
             {isLoading && <p>正在載入星座圖...</p>}
             {error && (
@@ -387,22 +387,25 @@ const ConstellationViewer: React.FC = () => {
                     )}
                 </div>
             )}
-            {imageUrl && (
-                <img
-                    key={imageUrl} // 使用 key 確保 URL 變化時 img 元素刷新
-                    src={imageUrl}
-                    alt="Constellation Diagram"
-                    onLoad={handleImageLoad}
-                    onError={handleImageError}
-                    style={{
-                        width: '100%',
-                        height: 'auto',
-                        border: '1px solid #ccc',
-                        display: isLoading || !imageUrl ? 'none' : 'block',
-                    }}
-                />
-            )}
-            {isLoading && !imageUrl && <p>正在載入星座圖...</p>}
+            <div style={{ flexGrow: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', minHeight: '50vh' }}>
+                {imageUrl && (
+                    <img
+                        key={imageUrl} // 使用 key 確保 URL 變化時 img 元素刷新
+                        src={imageUrl}
+                        alt="Constellation Diagram"
+                        onLoad={handleImageLoad}
+                        onError={handleImageError}
+                        style={{
+                            maxWidth: '100%',
+                            maxHeight: '100%',
+                            objectFit: 'contain',
+                            border: '1px solid #ccc',
+                            display: isLoading || !imageUrl ? 'none' : 'block',
+                        }}
+                    />
+                )}
+                {isLoading && !imageUrl && <p>正在載入星座圖...</p>}
+            </div>
         </div>
     )
 }

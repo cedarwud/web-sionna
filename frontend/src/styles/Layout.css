@@ -10,11 +10,9 @@
 /* 側邊欄樣式 - 懸浮 & 下移 */
 .sidebar {
   width: 300px;
-  /* height: 100vh; */ /* 移除舊的高度 */
   height: calc(100vh - 70px); /* 新的高度，減去 top 值 */
   position: fixed;
   left: 0;
-  /* top: 0; */ /* 移除舊的 top */
   top: 70px; /* 新的 top 值，使其向下移動 */
   transform: translateX(0); /* 展開狀態 */
   transition: transform 0.3s ease; /* 只過渡 transform */
@@ -75,38 +73,34 @@
   background-color: var(--dark-highlight);
 }
 
-/* 主內容區域 - 始終佔滿全寬 */
+/* 主內容區域 - 始終佔滿全寬和全高 */
 .main-content {
   flex-grow: 1;
-  height: 100vh;
+  flex-basis: 100%;
+  width: 100%;
+  min-height: 100vh;
+  height: auto;
   overflow-y: auto;
-  /* 移除 margin-left 過渡 */
   margin-left: 0; /* 始終為 0 */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  box-sizing: border-box;
 }
 
-/* 移除之前用於推開主內容的規則 */
-/*
-.layout.sidebar-expanded .main-content {
-  margin-left: 300px;
+/* 確保內容容器內的元素可以撐滿可用空間 */
+.main-content > div {
+  flex-grow: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
 }
-*/
 
-/* 移除不再需要的 @media 查詢和小屏幕特定樣式 */
-/*
-@media (max-width: 768px) {
-  .sidebar {
-    position: fixed;
-    z-index: 1001;
-  }
-
-  .sidebar.collapsed {
-    transform: translateX(-100%);
-    width: 300px;
-  }
-
-  .main-content {
-    margin-left: 0;
-    width: 100%;
-  }
+/* 確保圖表、3D 視圖等組件一開始就擴展到最大尺寸 */
+canvas, .scene-container, .constellation-container, .scene-viewer-container {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 80vh !important;  /* 確保至少佔據80%的視口高度 */
+  flex-grow: 1;
 }
-*/ 
