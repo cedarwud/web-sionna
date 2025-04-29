@@ -7,64 +7,53 @@ import '../styles/Sidebar.css'
 type DeviceType = 'tx' | 'rx' | 'int'
 
 interface SidebarProps {
-    tempDevices: Device[]
+    devices: Device[]
+    loading: boolean
     apiStatus: 'disconnected' | 'connected' | 'error'
-    error: string | null
-    selectedScene: string
-    hasTempDevices: boolean
-    handleApply: () => void
-    handleCancel: () => void
-    handleSceneChange: (e: React.ChangeEvent<HTMLSelectElement>) => void
-    handleDeviceChange: (id: number, field: keyof Device, value: any) => void
-    handleDeleteDevice: (id: number) => void
-    handleAddDevice: () => void
+    onDeviceChange: (id: number, field: keyof Device, value: any) => void
+    onDeleteDevice: (id: number) => void
+    onAddDevice: () => void
+    onRefresh: () => void
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
-    tempDevices,
+    devices,
+    loading,
     apiStatus,
-    error,
-    selectedScene,
-    hasTempDevices,
-    handleApply,
-    handleCancel,
-    handleSceneChange,
-    handleDeviceChange,
-    handleDeleteDevice,
-    handleAddDevice,
+    onDeviceChange,
+    onDeleteDevice,
+    onAddDevice,
+    onRefresh,
 }) => {
     return (
         <div className="sidebar-container">
             <div className="sidebar-header">
+                <h2>網路設備</h2>
                 <div className="button-group">
-                    <button
-                        onClick={handleApply}
-                        disabled={apiStatus !== 'connected'}
-                    >
-                        Apply
+                    <button onClick={onRefresh} disabled={loading}>
+                        重新整理
                     </button>
-                    <button onClick={handleCancel}>Cancel</button>
-                </div>
-                <div className="scene-selector">
-                    <select value={selectedScene} onChange={handleSceneChange}>
-                        <option value="Etoile">Etoile</option>
-                        <option value="國立陽明交通大學">
-                            國立陽明交通大學
-                        </option>
-                        <option value="國立臺北大學">國立臺北大學</option>
-                    </select>
                 </div>
             </div>
-            {error && <div className="error-message">{error}</div>}
+            <div className="api-status">
+                API 狀態:{' '}
+                {apiStatus === 'connected' ? (
+                    <span className="status-connected">已連接</span>
+                ) : apiStatus === 'error' ? (
+                    <span className="status-error">錯誤</span>
+                ) : (
+                    <span className="status-disconnected">未連接</span>
+                )}
+            </div>
             <div className="devices-list">
-                {[...tempDevices].map((device) => (
+                {[...devices].map((device) => (
                     <div key={device.id} className="device-item">
                         <div className="device-header">
                             <input
                                 type="text"
                                 value={device.name}
                                 onChange={(e) =>
-                                    handleDeviceChange(
+                                    onDeviceChange(
                                         device.id,
                                         'name',
                                         e.target.value
@@ -74,7 +63,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             />
                             <button
                                 className="delete-btn"
-                                onClick={() => handleDeleteDevice(device.id)}
+                                onClick={() => onDeleteDevice(device.id)}
                             >
                                 &#10006;
                             </button>
@@ -84,7 +73,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 <thead>
                                     <tr>
                                         <th></th>
-                                        <th>Type</th>
+                                        <th>類型</th>
                                         <th>X</th>
                                         <th>Y</th>
                                         <th>Z</th>
@@ -97,7 +86,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 type="checkbox"
                                                 checked={device.active}
                                                 onChange={(e) =>
-                                                    handleDeviceChange(
+                                                    onDeviceChange(
                                                         device.id,
                                                         'active',
                                                         e.target.checked
@@ -109,7 +98,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                             <select
                                                 value={device.type}
                                                 onChange={(e) =>
-                                                    handleDeviceChange(
+                                                    onDeviceChange(
                                                         device.id,
                                                         'type',
                                                         e.target
@@ -127,7 +116,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 type="number"
                                                 value={device.x}
                                                 onChange={(e) =>
-                                                    handleDeviceChange(
+                                                    onDeviceChange(
                                                         device.id,
                                                         'x',
                                                         parseFloat(
@@ -142,7 +131,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 type="number"
                                                 value={device.y}
                                                 onChange={(e) =>
-                                                    handleDeviceChange(
+                                                    onDeviceChange(
                                                         device.id,
                                                         'y',
                                                         parseFloat(
@@ -158,7 +147,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 value={device.z.toFixed(1)}
                                                 step="0.1"
                                                 onChange={(e) =>
-                                                    handleDeviceChange(
+                                                    onDeviceChange(
                                                         device.id,
                                                         'z',
                                                         parseFloat(
@@ -178,8 +167,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                 ))}
             </div>
             <div className="add-device-container">
-                <button onClick={handleAddDevice} className="add-device-btn">
-                    Add
+                <button onClick={onAddDevice} className="add-device-btn">
+                    添加設備
                 </button>
             </div>
         </div>

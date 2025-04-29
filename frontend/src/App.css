@@ -1,7 +1,9 @@
 #root {
   /* max-width: 1280px; */
   margin: 0 auto;
-  padding: 2rem;
+  height: 100vh;
+  width: 100%;
+  padding: 0;
   text-align: center;
 }
 
@@ -64,12 +66,107 @@ body {
 }
 
 .App {
+  height: 100%;
   width: 100%;
-  height: 100vh;
   display: flex;
   flex-direction: column;
   background-color: var(--dark-bg);
   color: var(--dark-text);
+}
+
+.scene-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 20px;
+  background-color: #333;
+  color: white;
+  border-bottom: 1px solid #555;
+}
+
+.scene-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.scene-selector select {
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid #666;
+  background-color: #444;
+  color: white;
+}
+
+.view-selector {
+  display: flex;
+  gap: 10px;
+}
+
+.view-selector button {
+  padding: 6px 12px;
+  border: none;
+  background-color: #444;
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.view-selector button.active {
+  background-color: #0066cc;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.apply-button, .cancel-button {
+  padding: 6px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.apply-button {
+  background-color: #4caf50;
+  color: white;
+}
+
+.apply-button:disabled {
+  background-color: #8bc34a;
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cancel-button {
+  background-color: #f44336;
+  color: white;
+}
+
+.cancel-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error-message {
+  background-color: #ffebee;
+  color: #c62828;
+  padding: 10px;
+  margin: 10px;
+  border-radius: 4px;
+  border: 1px solid #ef9a9a;
+}
+
+/* 深色主題 */
+.dark-theme {
+  background-color: #222;
+  color: #eee;
+}
+
+.dark-theme .main-content {
+  background-color: #333;
 }
 
 /* 表格樣式 */

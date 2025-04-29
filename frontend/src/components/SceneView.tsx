@@ -1,20 +1,60 @@
 // src/SceneView.tsx
-import { Suspense, useLayoutEffect, useMemo } from 'react'
+import { Suspense, useLayoutEffect, useMemo, useEffect, useState } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { ContactShadows } from '@react-three/drei'
 import { Bounds, OrbitControls, useGLTF } from '@react-three/drei'
+// @ts-ignore
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader'
 import * as THREE from 'three'
-import { TextureLoader, RepeatWrapping } from 'three'
+import { TextureLoader, RepeatWrapping, SRGBColorSpace } from 'three'
+import { Device } from '../App' // 從 App 引入前端 Device 介面
 
 // 修正 API 路徑，使用 GET 端點而非 POST 端點
 // 前端路徑帶 /api 前綴，vite 會將其重寫並代理到後端
 const SCENE_URL = '/api/v1/sionna/scene'
 
+// 定義設備類型材質和尺寸
+const TX_MATERIAL = new THREE.MeshStandardMaterial({
+    color: 0x0000ff, // 藍色
+    emissive: 0x000066,
+    emissiveIntensity: 0.5,
+})
+const RX_MATERIAL = new THREE.MeshStandardMaterial({
+    color: 0xff0000, // 紅色
+    emissive: 0x660000,
+    emissiveIntensity: 0.5,
+})
+const INT_MATERIAL = new THREE.MeshStandardMaterial({
+    color: 0x000000, // 黑色
+    emissive: 0x000000,
+    emissiveIntensity: 0.5,
+})
+const DEVICE_SIZE = 5
+
+// 定義射線材質
+const RAY_MATERIAL = new THREE.LineBasicMaterial({
+    color: 0xffff00,
+    linewidth: 1,
+})
+const LOS_MATERIAL = new THREE.LineBasicMaterial({
+    color: 0x00ff00,
+    linewidth: 2,
+})
+
+interface EtoileProps {
+    devices: Device[]
+}
+
 /* ---------------- 1) 讀 glTF → 加材質 / Normals ---------------- */
-function Etoile() {
+function Etoile({ devices = [] }: EtoileProps) {
     const { scene } = useGLTF(SCENE_URL) as GLTF
     const { controls } = useThree()
+    const [rays, setRays] = useState<THREE.Line[]>([])
+
+    // 將useLayoutEffect從useMemo中移出，放在組件頂層
+    useLayoutEffect(() => {
+        controls?.target?.set(0, 0, 0)
+    }, [controls])
 
     /** 只在 glTF 載完後跑一次 → 回傳處理後的 clone */
     const prepared = useMemo(() => {
@@ -48,13 +88,13 @@ function Etoile() {
             tex.repeat.set(40, 40)
 
             // 指定色彩空間
-            tex.encoding = THREE.SRGBColorSpace
+            tex.colorSpace = SRGBColorSpace
         })
 
         // 尋找最大面積（可能是地面）的網格
         let maxArea = 0
         let groundMesh: THREE.Mesh | null = null
-        root.traverse((o) => {
+        root.traverse((o: any) => {
             if ((o as THREE.Mesh).isMesh) {
                 const m = o as THREE.Mesh
                 m.geometry.computeBoundingBox()
@@ -81,7 +121,6 @@ function Etoile() {
                 displacementScale: 5,
                 aoMap: aoTex,
                 aoMapIntensity: 1.5,
-                displacementScale: 5, // ← 擠出高度量 (可從 1→20 微調)
                 displacementBias: -2, // ← 讓整體往下移避免浮在空中
                 color: 0xffffff,
                 roughness: 1.0,
@@ -92,46 +131,139 @@ function Etoile() {
                 normalScale: new THREE.Vector2(0.5, 0.5),
             })
             groundMesh.receiveShadow = true // ← 地板接收陰影
-            groundMesh.castShadow = false // ← 地板本身不投影到自己        }
+            groundMesh.castShadow = false // ← 地板本身不投影到自己
+        }
 
-            const geom = groundMesh.geometry as THREE.BufferGeometry
-            const uvAttr = geom.attributes.uv as
-                | THREE.BufferAttribute
-                | undefined
+        const geom = groundMesh?.geometry as THREE.BufferGeometry | undefined
+        const uvAttr = geom?.attributes.uv as THREE.BufferAttribute | undefined
 
-            if (uvAttr) {
-                // 如果確定有 uv，就設第二組 uv2
-                geom.setAttribute(
-                    'uv2',
-                    new THREE.BufferAttribute(
-                        uvAttr.array,
-                        uvAttr.itemSize,
-                        uvAttr.normalized
-                    )
+        if (uvAttr) {
+            // 如果確定有 uv，就設第二組 uv2
+            geom?.setAttribute(
+                'uv2',
+                new THREE.BufferAttribute(
+                    uvAttr.array,
+                    uvAttr.itemSize,
+                    uvAttr.normalized
                 )
-            } else {
-                console.warn('groundMesh 沒有 UV，跳過 aoMap 設定')
-                // 如果一定要用 AO，可以改用全局 AO 或 ContactShadows，不用靠 aoMap
-                groundMesh.material.aoMap = undefined
+            )
+        } else {
+            console.warn('groundMesh 沒有 UV，跳過 aoMap 設定')
+            // 如果一定要用 AO，可以改用全局 AO 或 ContactShadows，不用靠 aoMap
+            if (groundMesh) {
+                // 移除 aoMap 並調整材質
+                const material =
+                    groundMesh.material as THREE.MeshStandardMaterial
+                material.aoMap = undefined
+                material.aoMapIntensity = 0
+                // 可以調整其他材質參數以補償 AO 效果的缺失
+                material.roughness = 0.8
+                material.metalness = 0.1
+                material.emissiveIntensity = 0.4
             }
         }
 
-        useLayoutEffect(() => {
-            controls?.target.set(0, 0, 0)
-        }, [controls])
-
         return root
     }, [scene])
-    // <Bounds fit clip observe margin={0.8}>
+
+    // 載入射線數據
+    useEffect(() => {
+        // 清除之前的射線
+        rays.forEach((ray) => ray.removeFromParent())
+
+        // 如果沒有設備，不需要獲取射線數據
+        if (devices.length === 0) {
+            setRays([])
+            return
+        }
+
+        // 獲取射線路徑數據
+        const fetchRayData = async () => {
+            try {
+                const response = await fetch('/api/v1/sionna/ray-paths')
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`)
+                }
+                const data = await response.json()
+
+                // 創建射線物件
+                const newRays: THREE.Line[] = []
+
+                if (data && Array.isArray(data.paths)) {
+                    data.paths.forEach((path) => {
+                        if (
+                            path.points &&
+                            Array.isArray(path.points) &&
+                            path.points.length >= 2
+                        ) {
+                            const points = path.points.map(
+                                (point) =>
+                                    new THREE.Vector3(point.x, point.z, point.y)
+                            )
+                            const geometry =
+                                new THREE.BufferGeometry().setFromPoints(points)
+                            const material = path.is_los
+                                ? LOS_MATERIAL
+                                : RAY_MATERIAL
+                            const line = new THREE.Line(geometry, material)
+                            newRays.push(line)
+                        }
+                    })
+                }
+
+                setRays(newRays)
+            } catch (error) {
+                console.error('Error fetching ray data:', error)
+            }
+        }
+
+        fetchRayData()
+    }, [devices])
+
+    // 渲染設備
+    const deviceMeshes = useMemo(() => {
+        return devices.map((device) => {
+            // 根據設備類型選擇材質
+            let material
+            if (device.name.startsWith('tx-')) {
+                material = TX_MATERIAL
+            } else if (device.name.startsWith('rx-')) {
+                material = RX_MATERIAL
+            } else if (device.name.startsWith('int-')) {
+                material = INT_MATERIAL
+            } else {
+                material = TX_MATERIAL // 默認為發射器材質
+            }
+
+            // 為了清晰顯示，設備位置Y軸上移5單位（避免埋在地形裡）
+            return (
+                <mesh
+                    key={device.id}
+                    position={[device.x, device.z + 5, device.y]}
+                    material={material}
+                >
+                    <sphereGeometry args={[DEVICE_SIZE, 16, 16]} />
+                </mesh>
+            )
+        })
+    }, [devices])
 
     return (
         <Bounds>
             <primitive object={prepared} />
+            {deviceMeshes}
+            {rays.map((ray, index) => (
+                <primitive key={`ray-${index}`} object={ray} />
+            ))}
         </Bounds>
     )
 }
 
-export default function SceneView() {
+interface SceneViewProps {
+    devices: Device[]
+}
+
+export default function SceneView({ devices = [] }: SceneViewProps) {
     return (
         <div
             className="scene-container"
@@ -177,7 +309,7 @@ export default function SceneView() {
                 />
                 <directionalLight position={[-5, -10, -5]} intensity={0.8} />
                 <Suspense fallback={null}>
-                    <Etoile />
+                    <Etoile devices={devices} />
                     <ContactShadows
                         position={[0, 0, 0]} // z=0 地面
                         opacity={0.3} // 控制陰影深淺

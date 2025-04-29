@@ -1,7 +1,5 @@
 // src/App.tsx
 import { useState, useEffect, useCallback } from 'react'
-import SceneViewer from './components/SceneViewer'
-import ConstellationViewer from './components/ConstellationViewer'
 import SceneView from './components/SceneView'
 import Layout from './components/Layout'
 import Sidebar from './components/Sidebar'
@@ -354,112 +352,6 @@ function App() {
         setError(null)
     }
 
-    // 處理場景選擇
-    const handleSceneChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        setSelectedScene(e.target.value)
-    }
-
-    // 處理單個設備屬性更改
-    const handleDeviceChange = (
-        id: number,
-        field: keyof Device,
-        value: any
-    ) => {
-        setTempDevices((prev) => {
-            if (field === 'type') {
-                const deviceToUpdate = prev.find((d) => d.id === id)
-                if (deviceToUpdate) {
-                    const currentName = deviceToUpdate.name
-                    const isDefaultNamingFormat = /^(tx|rx|int)-\d+$/.test(
-                        currentName
-                    )
-                    const newType = value as DeviceType
-
-                    // Only auto-update name if it was default or it's a new device
-                    if (isDefaultNamingFormat || deviceToUpdate.id < 0) {
-                        const getPrefix = (type: DeviceType): string => {
-                            switch (type) {
-                                case 'tx':
-                                    return 'tx-'
-                                case 'rx':
-                                    return 'rx-'
-                                case 'int':
-                                    return 'int-'
-                                default:
-                                    return 'device-'
-                            }
-                        }
-                        const newPrefix = getPrefix(newType)
-
-                        // Find the max number among existing devices of the NEW type (excluding the current one)
-                        let maxNum = 0
-                        prev.forEach((device) => {
-                            // Skip the device being edited
-                            if (device.id === id) return
-
-                            if (device.name.startsWith(newPrefix)) {
-                                const match = device.name.match(/-(\d+)$/)
-                                if (match) {
-                                    const num = parseInt(match[1], 10)
-                                    if (!isNaN(num) && num > maxNum) {
-                                        maxNum = num
-                                    }
-                                }
-                            }
-                        })
-
-                        const newNumber = maxNum + 1
-                        const newName = `${newPrefix}${newNumber}`
-
-                        // Note: Uniqueness check might be redundant now but kept for safety
-                        let uniqueName = newName
-                        let suffix = newNumber
-                        const otherNames = prev
-                            .filter((d) => d.id !== id)
-                            .map((d) => d.name)
-                        while (otherNames.includes(uniqueName)) {
-                            suffix++
-                            uniqueName = `${newPrefix}${suffix}`
-                        }
-
-                        // Update type and the newly generated name
-                        return prev.map((device) =>
-                            device.id === id
-                                ? { ...device, type: newType, name: uniqueName }
-                                : device
-                        )
-                    }
-                    // If name wasn't default and it's not a new device, just update type
-                    else {
-                        return prev.map((device) =>
-                            device.id === id
-                                ? { ...device, type: newType } // Only update type
-                                : device
-                        )
-                    }
-                }
-            }
-
-            // Handle other field changes (non-type)
-            return prev.map((device) =>
-                device.id === id ? { ...device, [field]: value } : device
-            )
-        })
-
-        // Mark changes if a persistent device (id > 0) was modified
-        if (id > 0) {
-            const originalDevice = originalDevices.find((dev) => dev.id === id)
-            const currentDevice = tempDevices.find((d) => d.id === id)
-            // Check against original state or if the value actually changed compared to current temp state
-            if (
-                originalDevice &&
-                JSON.stringify(currentDevice) !== JSON.stringify(originalDevice)
-            ) {
-                setHasTempDevices(true)
-            }
-        }
-    }
-
     // 處理刪除設備
     const handleDeleteDevice = async (id: number) => {
         // 如果是新添加的、未保存的設備 (ID 為負數)
@@ -579,56 +471,163 @@ function App() {
         console.log('已在前端創建臨時設備:', newDevice)
     }
 
+    // 處理單個設備屬性更改
+    const handleDeviceChange = (
+        id: number,
+        field: keyof Device,
+        value: any
+    ) => {
+        setTempDevices((prev) => {
+            if (field === 'type') {
+                const deviceToUpdate = prev.find((d) => d.id === id)
+                if (deviceToUpdate) {
+                    const currentName = deviceToUpdate.name
+                    const isDefaultNamingFormat = /^(tx|rx|int)-\d+$/.test(
+                        currentName
+                    )
+                    const newType = value as DeviceType
+
+                    // Only auto-update name if it was default or it's a new device
+                    if (isDefaultNamingFormat || deviceToUpdate.id < 0) {
+                        const getPrefix = (type: DeviceType): string => {
+                            switch (type) {
+                                case 'tx':
+                                    return 'tx-'
+                                case 'rx':
+                                    return 'rx-'
+                                case 'int':
+                                    return 'int-'
+                                default:
+                                    return 'device-'
+                            }
+                        }
+                        const newPrefix = getPrefix(newType)
+
+                        // Find the max number among existing devices of the NEW type (excluding the current one)
+                        let maxNum = 0
+                        prev.forEach((device) => {
+                            // Skip the device being edited
+                            if (device.id === id) return
+
+                            if (device.name.startsWith(newPrefix)) {
+                                const match = device.name.match(/-(\d+)$/)
+                                if (match) {
+                                    const num = parseInt(match[1], 10)
+                                    if (!isNaN(num) && num > maxNum) {
+                                        maxNum = num
+                                    }
+                                }
+                            }
+                        })
+
+                        const newNumber = maxNum + 1
+                        const newName = `${newPrefix}${newNumber}`
+
+                        // Note: Uniqueness check might be redundant now but kept for safety
+                        let uniqueName = newName
+                        let suffix = newNumber
+                        const otherNames = prev
+                            .filter((d) => d.id !== id)
+                            .map((d) => d.name)
+                        while (otherNames.includes(uniqueName)) {
+                            suffix++
+                            uniqueName = `${newPrefix}${suffix}`
+                        }
+
+                        // Update type and the newly generated name
+                        return prev.map((device) =>
+                            device.id === id
+                                ? { ...device, type: newType, name: uniqueName }
+                                : device
+                        )
+                    }
+                    // If name wasn't default and it's not a new device, just update type
+                    else {
+                        return prev.map((device) =>
+                            device.id === id
+                                ? { ...device, type: newType } // Only update type
+                                : device
+                        )
+                    }
+                }
+            }
+
+            // Handle other field changes (non-type)
+            return prev.map((device) =>
+                device.id === id ? { ...device, [field]: value } : device
+            )
+        })
+
+        // Mark changes if a persistent device (id > 0) was modified
+        if (id > 0) {
+            const originalDevice = originalDevices.find((dev) => dev.id === id)
+            const currentDevice = tempDevices.find((d) => d.id === id)
+            // Check against original state or if the value actually changed compared to current temp state
+            if (
+                originalDevice &&
+                JSON.stringify(currentDevice) !== JSON.stringify(originalDevice)
+            ) {
+                setHasTempDevices(true)
+            }
+        }
+    }
+
     if (loading) {
         return <div className="loading">載入中...</div>
     }
 
-    const sidebarContent = (
-        <Sidebar
-            tempDevices={tempDevices}
-            apiStatus={apiStatus}
-            error={error}
-            selectedScene={selectedScene}
-            hasTempDevices={hasTempDevices}
-            handleApply={handleApply}
-            handleCancel={handleCancel}
-            handleSceneChange={handleSceneChange}
-            handleDeviceChange={handleDeviceChange}
-            handleDeleteDevice={handleDeleteDevice}
-            handleAddDevice={handleAddDevice}
-        />
-    )
-
-    const mainContent = (
-        <>
-            {/* 顯示警告訊息，如果有臨時設備 */}
-            {hasTempDevices && (
-                <div
-                    className="warning-message"
-                    style={{
-                        color: 'orange',
-                        padding: '10px',
-                        textAlign: 'center',
-                    }}
-                >
-                    您有未保存的設備更改。請點擊 Apply 按鈕保存更改並更新圖像。
-                </div>
-            )}
-            {/* 渲染可視化組件 */}
-            <SceneView />
-        </>
-    )
-    // <SceneViewer
-    //     devices={tempDevices}
-    //     refreshDeviceData={refreshDeviceData}
-    // />
-    // <ConstellationViewer />
-
     return (
-        <div className="App">
-            <Layout sidebar={sidebarContent} defaultCollapsed={true}>
-                {mainContent}
-            </Layout>
+        <div className="App dark-theme">
+            <Layout
+                sidebar={
+                    <Sidebar
+                        devices={tempDevices}
+                        onDeviceChange={handleDeviceChange}
+                        onAddDevice={handleAddDevice}
+                        onDeleteDevice={handleDeleteDevice}
+                        loading={loading}
+                        apiStatus={apiStatus}
+                        onRefresh={refreshDeviceData}
+                    />
+                }
+                content={
+                    <div className="main-content">
+                        <div
+                            className="scene-controls"
+                            style={{ display: 'none' }}
+                        >
+                            <div className="action-buttons">
+                                <button
+                                    onClick={handleApply}
+                                    disabled={
+                                        loading ||
+                                        apiStatus !== 'connected' ||
+                                        !hasTempDevices
+                                    }
+                                    className="apply-button"
+                                >
+                                    套用
+                                </button>
+                                <button
+                                    onClick={handleCancel}
+                                    disabled={loading}
+                                    className="cancel-button"
+                                >
+                                    取消
+                                </button>
+                            </div>
+                        </div>
+
+                        <SceneView devices={tempDevices} />
+
+                        {error && (
+                            <div className="error-message">
+                                <p>{error}</p>
+                            </div>
+                        )}
+                    </div>
+                }
+            />
         </div>
     )
 }
