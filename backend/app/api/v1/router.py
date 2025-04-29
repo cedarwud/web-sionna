@@ -1,7 +1,8 @@
 # backend/app/api/v1/router.py
 from fastapi import APIRouter
+
 # 從 endpoints 目錄導入 sionna 和 devices 路由
-from app.api.v1.endpoints import sionna, devices
+from app.api.v1.endpoints import sionna, devices, check_glb
 
 api_router = APIRouter()
 
@@ -18,3 +19,5 @@ api_router.include_router(devices.router, prefix="/devices", tags=["Devices"])
 # 註：兩種路由模式（devices 和 interferers）底層調用的是同一套 CRUD 函數
 # 這樣做的主要原因是保持 API 的向後兼容性，同時也使前端代碼更清晰
 # 未來可以考慮完全整合為一套 API，讓前端通過查詢參數指定設備類型
+
+api_router.include_router(check_glb.router, prefix="/check-glb", tags=["Check Glb"])

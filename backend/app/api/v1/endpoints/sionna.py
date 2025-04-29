@@ -1,13 +1,17 @@
 import logging
 import os
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 import sionna.rt as rt
-import tempfile
-import shutil
+import tempfile, shutil
 from pathlib import Path
 import trimesh
+
+import io
+import pyrender
+import numpy as np
+from PIL import Image
 
 from app.api.deps import get_session  # Import dependency
 from app.services.sionna_simulation import (  # Import service functions
@@ -59,7 +63,6 @@ def build_gltf() -> bool:
         # 2) 把每個 shape 寫成 PLY
         import mitsuba as mi
         import trimesh as tm
-        import numpy as np
 
         ply_shapes = []
         for i, shape in enumerate(mi_scene.shapes()):
@@ -123,43 +126,84 @@ def build_gltf() -> bool:
 
 # 新增：提供 GLB 模型的端點
 @router.get("/scene", tags=["Sionna Scene"])
-async def get_scene_glb():
+async def get_scene_glb(render: bool = Query(False)):
     """
-    提供 3D 模型的 GLB 檔案。優先使用 XIN.glb，如果找不到則使用或生成 scene.glb
+    提供 3D 模型的 GLB 檔案；如果帶上 `?render=true`，
+    則在後端對地面塗上淺灰，並回傳渲染後的 PNG 圖像。
     """
-    logger.info("--- API Request: /sionna/scene ---")
-
-    # 優先檢查 XIN.glb 是否存在
-    if XIN_GLB_PATH.exists() and os.path.getsize(XIN_GLB_PATH) > 0:
-        logger.info(f"Using existing XIN.glb file from {XIN_GLB_PATH}")
-        return FileResponse(
-            path=str(XIN_GLB_PATH),
-            media_type="model/gltf-binary",
-            filename="scene.glb",  # 保持檔案名稱一致，以避免前端需要修改
-        )
+    # 1) 選擇要用的原始 GLB
+    if os.path.exists(XIN_GLB_PATH) and os.path.getsize(XIN_GLB_PATH) > 0:
+        glb_path = XIN_GLB_PATH
     else:
-        logger.info("XIN.glb not found or empty, falling back to scene.glb")
+        if not os.path.exists(GLB_PATH) or os.path.getsize(GLB_PATH) == 0:
+            if not build_gltf():
+                raise HTTPException(500, "無法生成 scene.glb")
+        glb_path = GLB_PATH
 
-        # 檢查 scene.glb 是否存在，如果不存在則生成
-        if not GLB_PATH.exists() or os.path.getsize(GLB_PATH) == 0:
-            logger.info("scene.glb file not found or empty, generating...")
-            success = build_gltf()
-            if not success:
-                logger.error("Failed to generate scene.glb file")
-                raise HTTPException(
-                    status_code=500, detail="Failed to generate scene model"
-                )
+    # 2) 如果需要 render，後端 Offscreen 渲染
+    if render:
+        # 2.1 讀入場景
+        scene = trimesh.load(glb_path, force="scene")
 
-        # 再次檢查 scene.glb 文件是否存在
-        if not GLB_PATH.exists():
-            logger.error(f"scene.glb file not found at {GLB_PATH}")
-            raise HTTPException(status_code=404, detail="Scene model not found")
+        # 2.2 找出 ground mesh（按面積最大者判定）
+        areas = {name: mesh.area for name, mesh in scene.geometry.items()}
+        if not areas:
+            raise HTTPException(500, "場景中沒有網格可渲染")
+        ground_name = max(areas, key=areas.get)
 
-        # 返回 scene.glb 文件
-        logger.info(f"Serving scene.glb file from {GLB_PATH}")
-        return FileResponse(
-            path=str(GLB_PATH), media_type="model/gltf-binary", filename="scene.glb"
+        # 2.3 建立 pyrender.Scene，設定淺灰背景 + 中度環境光
+        pr_scene = pyrender.Scene(
+            bg_color=[0.8, 0.8, 0.8, 1.0], ambient_light=[0.6, 0.6, 0.6]
         )
+
+        # 2.4 把每個子網格加入場景，只有地面 override 顏色
+        for name, geom in scene.geometry.items():
+            # 確保法線存在
+            if not geom.has_vertex_normals:
+                geom.compute_vertex_normals()
+            # 如果是地面，用淺灰頂點色覆蓋
+            if name == ground_name:
+                n = geom.vertices.shape[0]
+                gray = np.tile([180, 180, 170, 255], (n, 1))  # R/G/B/A
+                geom.visual.vertex_colors = gray
+            # 其他網格保留原貼圖／材質
+            mesh = pyrender.Mesh.from_trimesh(geom, smooth=False)
+            pr_scene.add(mesh)
+
+        # 2.5 加光源：一盞主光 + 一盞補光
+        key = pyrender.DirectionalLight(color=np.ones(3), intensity=3.0)
+        fill = pyrender.DirectionalLight(color=np.ones(3), intensity=1.5)
+        pr_scene.add(key, pose=np.eye(4))
+        pr_scene.add(fill, pose=np.diag([-1, -1, -1, 1]))
+
+        # 2.6 設置相機（對應 notebook 角度）
+        camera = pyrender.PerspectiveCamera(yfov=np.pi / 4.0)
+        cam_pose = np.array(
+            [
+                [1, 0, 0, 0],
+                [0, 0, 1, -1500],
+                [0, -1, 0, 0],
+                [0, 0, 0, 1],
+            ]
+        )
+        pr_scene.add(camera, pose=cam_pose)
+
+        # 2.7 Offscreen render → PNG
+        renderer = pyrender.OffscreenRenderer(1200, 800)
+        color, _ = renderer.render(pr_scene)
+        renderer.delete()
+
+        buf = io.BytesIO()
+        Image.fromarray(color).save(buf, format="PNG")
+        buf.seek(0)
+        return StreamingResponse(buf, media_type="image/png")
+
+    # 3) 否則直接回傳原始 GLB
+    return FileResponse(
+        path=glb_path,
+        media_type="model/gltf-binary",
+        filename=os.path.basename(glb_path),
+    )
 
 
 @router.get("/scene-image-rt", tags=["Sionna Simulation"])
@@ -245,186 +289,3 @@ async def get_constellation_diagram_endpoint(
         raise HTTPException(
             status_code=500, detail="Failed to generate constellation diagram"
         )
-
-
-# 新增：檢查 GLB 文件是否包含頂點顏色的端點
-@router.post("/check-glb-colors", tags=["GLB Validation"])
-async def check_glb_colors(file_path: str = Form(None), file: UploadFile = File(None)):
-    """
-    檢查 GLB 檔案是否包含完整的頂點顏色資料。
-    可以通過兩種方式提供 GLB 檔案：
-    1. 上傳檔案
-    2. 提供檔案路徑
-
-    範例：
-    使用 curl 上傳檔案檢查:
-    ```
-    curl -X POST http://localhost:8000/api/v1/sionna/check-glb-colors -F file=@path/to/your/file.glb
-    ```
-
-    使用 curl 提供檔案路徑檢查:
-    ```
-    curl -X POST http://localhost:8000/api/v1/sionna/check-glb-colors -F file_path="/path/to/your/file.glb"
-    ```
-
-    回傳結果：
-    - has_colors: 是否有頂點顏色 (布爾值)
-    - color_coverage: 帶有顏色的頂點百分比 (0.0~1.0)
-    - vertex_count: 總頂點數
-    - colored_vertex_count: 帶有顏色的頂點數
-    - mesh_count: 3D 網格數量
-    - colored_mesh_count: 帶有顏色的網格數量
-    """
-    logger.info("--- API Request: /sionna/check-glb-colors ---")
-
-    # 判斷是使用上傳檔案還是檔案路徑
-    temp_file = None
-    path_to_check = None
-
-    try:
-        if file:
-            # 使用者上傳了檔案
-            temp_dir = tempfile.mkdtemp()
-            temp_file = Path(temp_dir) / file.filename
-
-            # 寫入臨時檔案
-            with open(temp_file, "wb") as f:
-                contents = await file.read()
-                f.write(contents)
-
-            path_to_check = temp_file
-            logger.info(f"Using uploaded file: {file.filename}")
-
-        elif file_path:
-            # 使用者提供了檔案路徑
-            # 檢查是否為容器內路徑，並做路徑轉換
-            host_path = file_path
-
-            # 嘗試轉換主機路徑到容器內路徑
-            if "/home/" in file_path:
-                # 確認是否在 Docker 環境中
-                if os.path.exists("/.dockerenv"):
-                    # 嘗試直接訪問檔案名而不是完整路徑
-                    container_path = (
-                        f"/app/app/static/models/{os.path.basename(file_path)}"
-                    )
-                    if os.path.exists(container_path):
-                        host_path = container_path
-                        logger.info(
-                            f"Converted host path to container path: {host_path}"
-                        )
-
-            path_to_check = Path(host_path)
-            logger.info(f"Using provided file path: {host_path}")
-
-            if not path_to_check.exists():
-                # 嘗試使用預設模型目錄
-                model_name = os.path.basename(file_path)
-                default_path = MODELS_DIR / model_name
-
-                if default_path.exists():
-                    path_to_check = default_path
-                    logger.info(
-                        f"Using file from default models directory: {path_to_check}"
-                    )
-                else:
-                    available_models = ", ".join(
-                        [f.name for f in MODELS_DIR.glob("*.glb")]
-                    )
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"File not found at path: {host_path}. Available models: {available_models}",
-                    )
-        else:
-            # 如果既沒有上傳檔案也沒有提供路徑，則使用預設的 GLB 檔案
-            path_to_check = GLB_PATH
-            logger.info(f"No file provided, using default GLB file: {GLB_PATH}")
-
-            if not path_to_check.exists():
-                raise HTTPException(
-                    status_code=404, detail=f"Default GLB file not found at: {GLB_PATH}"
-                )
-
-        # 檢查檔案是否為 GLB 格式
-        if path_to_check.suffix.lower() not in [".glb", ".gltf"]:
-            raise HTTPException(
-                status_code=400, detail="Provided file is not a GLB/GLTF file"
-            )
-
-        # 使用 trimesh 載入 GLB 模型並檢查頂點顏色
-        try:
-            scene = trimesh.load(str(path_to_check))
-
-            # 初始化計數器
-            total_vertices = 0
-            colored_vertices = 0
-            total_meshes = 0
-            colored_meshes = 0
-
-            # 遍歷場景中的所有網格
-            for mesh_name, mesh in scene.geometry.items():
-                if isinstance(mesh, trimesh.Trimesh):
-                    total_meshes += 1
-                    total_vertices += len(mesh.vertices)
-
-                    # 檢查是否有頂點顏色
-                    has_colors = (
-                        hasattr(mesh.visual, "vertex_colors")
-                        and mesh.visual.vertex_colors is not None
-                    )
-                    if has_colors and len(mesh.visual.vertex_colors) > 0:
-                        colored_meshes += 1
-                        colored_vertices += len(mesh.visual.vertex_colors)
-
-            # 計算有顏色的頂點比例
-            color_coverage = (
-                colored_vertices / total_vertices if total_vertices > 0 else 0
-            )
-
-            result = {
-                "has_colors": colored_vertices > 0,
-                "color_coverage": color_coverage,
-                "vertex_count": total_vertices,
-                "colored_vertex_count": colored_vertices,
-                "mesh_count": total_meshes,
-                "colored_mesh_count": colored_meshes,
-                "file_path": str(path_to_check),  # 新增實際使用的檔案路徑
-            }
-
-            logger.info(f"GLB analysis complete: {result}")
-
-            # 使用自訂回應，添加額外的換行
-            from fastapi.responses import Response
-            import json
-
-            # 先將結果轉為漂亮格式化的 JSON 字串，確保有適當的縮排和換行
-            json_content = json.dumps(result, ensure_ascii=False, indent=2)
-
-            # 回應內容加上額外的換行符，確保 curl 輸出後有換行
-            json_content = json_content + "\n"
-
-            return Response(
-                content=json_content,
-                media_type="application/json",
-                headers={"Content-Type": "application/json; charset=utf-8"},
-            )
-
-        except Exception as e:
-            logger.error(f"Error analyzing GLB file: {e}")
-            raise HTTPException(
-                status_code=500, detail=f"Error analyzing GLB file: {str(e)}"
-            )
-
-    except Exception as e:
-        logger.error(f"Error in check_glb_colors: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Error processing request: {str(e)}"
-        )
-    finally:
-        # 清理臨時檔案
-        if temp_file and Path(temp_file).exists():
-            try:
-                shutil.rmtree(Path(temp_file).parent)
-                logger.info(f"Cleaned up temporary file: {temp_file}")
-            except Exception as e:
-                logger.error(f"Error cleaning temporary file: {e}")

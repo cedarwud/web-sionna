@@ -1,14 +1,13 @@
 # backend/app/api/v1/endpoints/devices.py
 import logging
-from typing import List, Any, Optional, Union
+from typing import List, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 
 from app.api.deps import get_session
-from app.db.models import Device, DeviceType, TransmitterType, Transmitter
+from app.db.models import DeviceType, TransmitterType
 from app.schemas.device import Device as DeviceSchema, DeviceCreate, DeviceUpdate
-from app.schemas.interferer import InterfererCreate, InterfererUpdate, Interferer
+from app.schemas.interferer import InterfererCreate, InterfererUpdate
 from app.crud import crud_device
 from app.crud.crud_device import update_device_by_id
 

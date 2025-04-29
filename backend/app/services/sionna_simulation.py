@@ -3,7 +3,7 @@ import logging
 import os
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import List, Tuple, Optional, Any
+from typing import List, Optional
 from pydantic import BaseModel, Field as PydanticField  # Use Pydantic BaseModel
 import sionna.rt
 from sionna.rt import (
@@ -17,8 +17,6 @@ from sionna.rt import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 import collections.abc  # Import for checking iterable
-import tempfile  # <--- 新增導入
-import shutil  # <--- 新增導入
 
 # Import models and config from their new locations
 from app.db.models import Device, Transmitter, Receiver, DeviceType, TransmitterType
@@ -54,53 +52,6 @@ def add_to_scene_safe(scene, device):
     except ValueError:
         logger.warning(f"Device '{device.name}' might already exist in the scene.")
         pass
-
-
-# --- Database Device Fetching (Updated for x, y, z coordinates) ---
-async def get_active_devices_from_db(
-    session: AsyncSession,
-) -> tuple[List[DeviceData], List[DeviceData]]:
-    """獲取活動的發射器和接收器設備資料 (包含解析後的位置)"""
-    logger.info("Fetching active devices from database...")
-
-    # 使用整合後的 crud_device 中的 get_active_devices_by_type 函數
-    transmitters, receivers = await crud_device.get_active_devices_by_type(db=session)
-
-    # 獲取發射器類型信息
-    active_tx_ids = [tx.id for tx in transmitters if tx.id is not None]
-    tx_type_map = {}
-    if active_tx_ids:
-        tx_type_stmt = select(Transmitter).where(Transmitter.id.in_(active_tx_ids))
-        tx_type_result = await session.execute(tx_type_stmt)
-        tx_type_map = {
-            tx.id: tx.transmitter_type for tx in tx_type_result.scalars().all()
-        }
-
-    # 處理發射器數據
-    transmitters_data: List[DeviceData] = []
-    for dev_model in transmitters:
-        pos_list = [dev_model.x, dev_model.y, dev_model.z]
-        device_data = DeviceData(
-            device_model=dev_model,
-            position_list=pos_list,
-            transmitter_type=tx_type_map.get(dev_model.id),
-        )
-        transmitters_data.append(device_data)
-        logger.info(
-            f"Processed Active Transmitter: {dev_model.name}, Type: {device_data.transmitter_type}, Position: {pos_list}"
-        )
-
-    # 處理接收器數據
-    receivers_data: List[DeviceData] = []
-    for dev_model in receivers:
-        pos_list = [dev_model.x, dev_model.y, dev_model.z]
-        device_data = DeviceData(device_model=dev_model, position_list=pos_list)
-        receivers_data.append(device_data)
-        logger.info(
-            f"Processed Active Receiver: {dev_model.name}, Position: {pos_list}"
-        )
-
-    return transmitters_data, receivers_data
 
 
 # --- 更高效率版本的 get_active_devices_from_db 函數 ---
@@ -165,12 +116,6 @@ async def get_active_devices_from_db_efficient(
         )
 
     return transmitters_data, receivers_data
-
-
-# --- Sionna Scene/Plot Generation Functions ---
-
-
-# --- Removed generate_scene_original_image function ---
 
 
 async def generate_scene_with_paths_image(
@@ -275,16 +220,22 @@ async def generate_scene_with_paths_image(
             logger.info(f"Saving scene with paths directly to: {output_path}")
             plt.savefig(output_path, bbox_inches="tight", pad_inches=0, dpi=150)
             plt.close(fig)
-            
+
             # 確認文件確實存在且不為空
             if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                logger.info(f"Successfully saved scene image to {output_path}, size: {os.path.getsize(output_path)} bytes")
+                logger.info(
+                    f"Successfully saved scene image to {output_path}, size: {os.path.getsize(output_path)} bytes"
+                )
                 return True
             else:
-                logger.error(f"Failed to generate scene image or image is empty: {output_path}")
+                logger.error(
+                    f"Failed to generate scene image or image is empty: {output_path}"
+                )
                 return False
         except Exception as save_err:
-            logger.error(f"Error saving scene image to {output_path}: {save_err}", exc_info=True)
+            logger.error(
+                f"Error saving scene image to {output_path}: {save_err}", exc_info=True
+            )
             plt.close(fig)  # 確保關閉圖表
             return False
 
@@ -565,16 +516,22 @@ async def generate_constellation_plot(
             logger.info(f"Saving constellation diagram directly to: {output_path}")
             plt.savefig(output_path, bbox_inches="tight", dpi=100)
             plt.close(fig)  # 在保存後關閉圖表
-            
+
             # 確認文件確實存在且不為空
             if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                logger.info(f"Successfully saved image to {output_path}, size: {os.path.getsize(output_path)} bytes")
+                logger.info(
+                    f"Successfully saved image to {output_path}, size: {os.path.getsize(output_path)} bytes"
+                )
                 return True
             else:
-                logger.error(f"Failed to generate image or image is empty: {output_path}")
+                logger.error(
+                    f"Failed to generate image or image is empty: {output_path}"
+                )
                 return False
         except Exception as save_err:
-            logger.error(f"Error saving image to {output_path}: {save_err}", exc_info=True)
+            logger.error(
+                f"Error saving image to {output_path}: {save_err}", exc_info=True
+            )
             plt.close(fig)  # 確保關閉圖表
             return False
 
@@ -614,16 +571,23 @@ def generate_empty_scene_image(output_path: str):
             logger.info(f"Saving empty scene directly to: {output_path}")
             plt.savefig(output_path, bbox_inches="tight", pad_inches=0, dpi=150)
             plt.close(fig)
-            
+
             # 確認文件確實存在且不為空
             if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                logger.info(f"Successfully saved empty scene image to {output_path}, size: {os.path.getsize(output_path)} bytes")
+                logger.info(
+                    f"Successfully saved empty scene image to {output_path}, size: {os.path.getsize(output_path)} bytes"
+                )
                 return True
             else:
-                logger.error(f"Failed to generate empty scene image or image is empty: {output_path}")
+                logger.error(
+                    f"Failed to generate empty scene image or image is empty: {output_path}"
+                )
                 return False
         except Exception as save_err:
-            logger.error(f"Error saving empty scene image to {output_path}: {save_err}", exc_info=True)
+            logger.error(
+                f"Error saving empty scene image to {output_path}: {save_err}",
+                exc_info=True,
+            )
             plt.close(fig)  # 確保關閉圖表
             return False
     except Exception as e:

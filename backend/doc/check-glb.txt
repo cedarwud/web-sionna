@@ -15,6 +15,16 @@
     curl -X POST http://localhost:8000/api/v1/sionna/check-glb-colors -F file_path="/path/to/your/file.glb"
     ```
 
+    後處理 glb 後儲存成 scene.backed.glb
+    """
+    curl -X POST http://localhost:8000/api/v1/check-glb/bake-glb -d filename="scene.baked.glb"
+    """
+
+    檢查後處理過的 glb
+    """
+    curl -X POST http://localhost:8000/api/v1/check-glb/check-glb-colors -F file_path="scene.baked.glb"
+    """
+
     回傳結果：
     - has_colors: 是否有頂點顏色 (布爾值)
     - color_coverage: 帶有顏色的頂點百分比 (0.0~1.0)

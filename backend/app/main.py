@@ -28,6 +28,12 @@ logger.info(f"Static files directory set to: {OUTPUT_DIR}")
 app.mount("/rendered_images", StaticFiles(directory=OUTPUT_DIR), name="rendered_images")
 logger.info(f"Mounted static files directory '{OUTPUT_DIR}' at '/rendered_images'.")
 
+# 掛載 static 目錄
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+os.makedirs(STATIC_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+logger.info(f"Mounted static directory '{STATIC_DIR}' at '/static'.")
+
 # --- CORS Middleware ---
 # 允許特定域名的跨域請求，包括生產環境中的IP地址
 origins = [

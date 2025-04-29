@@ -24,6 +24,10 @@ ENV DRJIT_LIBLLVM_PATH=/usr/lib/x86_64-linux-gnu/libLLVM-14.so.1
 #    - 新增: postgresql-client (用於 psql command, 可選但方便除錯)
 #    - 新增: postgis (PostGIS extension 相關工具, 通常由 postgis/postgis image 提供，但客戶端工具可能有幫助)
 RUN apt update && apt install -y --no-install-recommends \
+    libgl1-mesa-glx \
+    libegl1-mesa \
+    libosmesa6 \
+    libosmesa6-dev \
     llvm-dev \
     libllvm14 \
     build-essential \
