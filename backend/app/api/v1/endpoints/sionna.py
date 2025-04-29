@@ -11,12 +11,10 @@ from app.api.deps import get_session  # Import dependency
 from app.services.sionna_simulation import (  # Import service functions
     generate_scene_with_paths_image,
     generate_constellation_plot,
-    generate_empty_scene_image,
 )
 from app.core.config import (  # Import constants
     SCENE_WITH_PATHS_IMAGE_PATH,
     CONSTELLATION_IMAGE_PATH,
-    EMPTY_SCENE_IMAGE_PATH,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,7 +25,7 @@ STATIC_DIR = (
     Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
     / "static"
 )
-MODELS_DIR = STATIC_DIR / "scenes"
+MODELS_DIR = STATIC_DIR / "models"
 GLB_PATH = MODELS_DIR / "scene.glb"
 
 # 確保目錄存在
@@ -36,64 +34,118 @@ logger.info(f"Models directory path: {MODELS_DIR}")
 
 
 # 新增：生成 GLB 模型的函數
+# gltf.py or glb.py 中的 build_gltf()
+
+
 def build_gltf() -> bool:
     """
-    將 Sionna RT 內建的 etoile 場景匯出為 GLB 模型文件
+    將 Sionna RT etoile 場景匯出為帶頂點色的 GLB 模型
     """
     try:
-        # 如果文件已存在且大小不為0，則跳過生成
-        if GLB_PATH.exists() and os.path.getsize(GLB_PATH) > 0:
-            logger.info(f"GLB file already exists at {GLB_PATH}")
-            return True
+        # 一律重新生成（或先手動刪掉舊檔），不用跳過
+        logger.info("Exporting etoile scene to GLB (Mitsuba+Trimesh route)...")
 
-        logger.info("Exporting etoile scene to GLB...")
-
-        # 確保目錄存在
+        # 確保目錄存在，清空 tmp
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
-
-        # 加載 Sionna RT 場景
-        scene = rt.load_scene(rt.scene.etoile)
-        mi_scene = scene._scene  # 低階 Mitsuba Scene
         tmp_dir = Path(tempfile.mkdtemp())
 
+        # 1) Mitsuba 讀場景
+        scene = rt.load_scene(rt.scene.etoile)
+        mi_scene = scene._scene
+
+        # 2) 把每個 shape 寫成 PLY
         import mitsuba as mi
         import trimesh as tm
+        import numpy as np
 
-        ply_paths = []
-
-        # 遍歷場景中的所有形狀並導出為 PLY
+        ply_shapes = []
         for i, shape in enumerate(mi_scene.shapes()):
             if isinstance(shape, mi.Mesh):
-                ply = tmp_dir / f"mesh_{i}.ply"
-                shape.write_ply(str(ply))
-                ply_paths.append(ply)
+                ply_path = tmp_dir / f"mesh_{i}.ply"
+                shape.write_ply(str(ply_path))  # default PLY
+                ply_shapes.append((ply_path, shape))
 
-        logger.info(f"Exported {len(ply_paths)} meshes to PLY")
-
-        if not ply_paths:
-            logger.error("No meshes found in scene")
+        if not ply_shapes:
+            logger.error("No Mitsuba meshes found")
             return False
 
-        # 加載 PLY 文件並合併
-        meshes = [tm.load(str(p), force="mesh") for p in ply_paths]
+        # 3) Trimesh 讀 PLY，並塞頂點色
+        tm_meshes = []
+        for ply_path, shape in ply_shapes:
+            mesh: tm.Trimesh = tm.load(str(ply_path), force="mesh")
 
-        combined = tm.util.concatenate(meshes)
+            # 從 Mitsuba BSDF 拿 base_color (float[3], 0~1)
+            try:
+                color_f = np.array(shape.bsdf.base_color)  # e.g. [0.8,0.7,0.6]
+            except AttributeError:
+                color_f = np.array([0.8, 0.8, 0.8])
 
-        # 導出為 GLB
-        combined.export(str(GLB_PATH))
+            # 轉 0~255 uint8
+            color_u = (np.clip(color_f, 0, 1) * 255).astype(np.uint8)
+            # 複製到所有 vertex
+            vert_count = mesh.vertices.shape[0]
+            mesh.visual.vertex_colors = np.tile(color_u.reshape(1, 3), (vert_count, 1))
 
-        # 清理臨時文件
+            tm_meshes.append(mesh)
+
+        # 4) 建立一个 tm.Scene，把每个带顶点色的 Trimesh 加进去
+        scene_tm = tm.Scene()
+        # 4) 用 ColorVisuals 強制走 vertex color 流程，再一次性 export
+        from trimesh.visual import ColorVisuals
+
+        scene_tm = tm.Scene()
+        for idx, mesh in enumerate(tm_meshes):
+            # 把可能的 TextureVisuals 換成只用 vertex_colors 的 ColorVisuals
+            mesh.visual = ColorVisuals(
+                mesh=mesh, vertex_colors=mesh.visual.vertex_colors
+            )
+            scene_tm.add_geometry(mesh, node_name=f"mesh_{idx}")
+
+        # ❗️ 一定要在 loop 外，只呼叫一次 export
+        scene_tm.export(str(GLB_PATH))
+
         shutil.rmtree(tmp_dir)
 
-        if GLB_PATH.exists() and os.path.getsize(GLB_PATH) > 0:
-            logger.info(f"Successfully created GLB file at {GLB_PATH}")
+        if GLB_PATH.exists() and GLB_PATH.stat().st_size > 0:
+            logger.info(f"GLB created at {GLB_PATH}")
             return True
         else:
             logger.error("GLB file creation failed")
             return False
+
     except Exception as e:
         logger.exception(f"Error generating GLB file: {e}")
         return False
+
+
+# 新增：提供 GLB 模型的端點
+@router.get("/scene", tags=["Sionna Scene"])
+async def get_scene_glb():
+    """
+    提供 Sionna RT etoile 場景的 GLB 模型文件
+    """
+    logger.info("--- API Request: /sionna/scene ---")
+
+    # 檢查 GLB 文件是否存在，如果不存在則生成
+    if not GLB_PATH.exists() or os.path.getsize(GLB_PATH) == 0:
+        logger.info("GLB file not found or empty, generating...")
+        success = build_gltf()
+        if not success:
+            logger.error("Failed to generate GLB file")
+            raise HTTPException(
+                status_code=500, detail="Failed to generate scene model"
+            )
+
+    # 檢查文件是否存在
+    if not GLB_PATH.exists():
+        logger.error(f"GLB file not found at {GLB_PATH}")
+        raise HTTPException(status_code=404, detail="Scene model not found")
+
+    # 返回 GLB 文件
+    logger.info(f"Serving GLB file from {GLB_PATH}")
+    return FileResponse(
+        path=str(GLB_PATH), media_type="model/gltf-binary", filename="scene.glb"
+    )
 
 
 @router.get("/scene-image-rt", tags=["Sionna Simulation"])
@@ -179,33 +231,3 @@ async def get_constellation_diagram_endpoint(
         raise HTTPException(
             status_code=500, detail="Failed to generate constellation diagram"
         )
-
-
-# 新增：提供 GLB 模型的端點
-@router.get("/scene", tags=["Sionna Scene"])
-async def get_scene_glb():
-    """
-    提供 Sionna RT etoile 場景的 GLB 模型文件
-    """
-    logger.info("--- API Request: /sionna/scene ---")
-
-    # 檢查 GLB 文件是否存在，如果不存在則生成
-    if not GLB_PATH.exists() or os.path.getsize(GLB_PATH) == 0:
-        logger.info("GLB file not found or empty, generating...")
-        success = build_gltf()
-        if not success:
-            logger.error("Failed to generate GLB file")
-            raise HTTPException(
-                status_code=500, detail="Failed to generate scene model"
-            )
-
-    # 檢查文件是否存在
-    if not GLB_PATH.exists():
-        logger.error(f"GLB file not found at {GLB_PATH}")
-        raise HTTPException(status_code=404, detail="Scene model not found")
-
-    # 返回 GLB 文件
-    logger.info(f"Serving GLB file from {GLB_PATH}")
-    return FileResponse(
-        path=str(GLB_PATH), media_type="model/gltf-binary", filename="scene.glb"
-    )

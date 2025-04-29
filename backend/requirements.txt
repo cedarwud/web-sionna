@@ -5,6 +5,7 @@ Pillow
 sionna
 sionna-rt
 trimesh
+open3d
 
 # --- 新增資料庫相關套件 ---
 sqlmodel

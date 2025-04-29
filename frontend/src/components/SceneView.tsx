@@ -1,9 +1,9 @@
 // src/SceneView.tsx
 import { Suspense, useLayoutEffect, useMemo } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { Bounds, Environment, OrbitControls, useGLTF } from '@react-three/drei'
+import { Bounds, OrbitControls, useGLTF } from '@react-three/drei'
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader'
-import * as THREE from 'three'             
+import * as THREE from 'three'
 
 // 修正 API 路徑，使其與 vite 代理配置相符
 // 前端路徑帶 /api 前綴，vite 會將其重寫並代理到後端
@@ -11,67 +11,112 @@ const SCENE_URL = '/api/v1/sionna/scene'
 
 /* ---------------- 1) 讀 glTF → 加材質 / Normals ---------------- */
 function Etoile() {
-  const { scene } = useGLTF(SCENE_URL) as GLTF
-  const { controls } = useThree()
+    const { scene } = useGLTF(SCENE_URL) as GLTF
+    const { controls } = useThree()
 
-  /** 只在 glTF 載完後跑一次 → 回傳處理後的 clone */
-  const prepared = useMemo(() => {
-    const root = scene.clone(true)          // ❗ 不要直接改原始 glTF，clone 一份
-    root.traverse(obj => {
-      if ((obj as THREE.Mesh).isMesh) {
-        const mesh = obj as THREE.Mesh
+    /** 只在 glTF 載完後跑一次 → 回傳處理後的 clone */
+    const prepared = useMemo(() => {
+        const root = scene.clone(true) // ❗ 不要直接改原始 glTF，clone 一份
+        root.traverse((obj) => {
+            if ((obj as THREE.Mesh).isMesh) {
+                const mesh = obj as THREE.Mesh
 
-        // (a) 沒 Normals → 補一份
-        const geo = mesh.geometry as THREE.BufferGeometry
-        if (!geo.attributes.normal) geo.computeVertexNormals()
+                // (a) 沒 Normals → 補一份
+                const geo = mesh.geometry as THREE.BufferGeometry
+                if (!geo.attributes.normal) geo.computeVertexNormals()
 
-        // (b) 給一個灰色 PBR 材質
-        mesh.material = new THREE.MeshStandardMaterial({
-          color: 0x8a8a8a,
-          roughness: 0.9,
-          metalness: 0,
+                // 2) DEBUG: 看看到底有哪些 attributes
+                console.log('▶ attributes', Object.keys(geo.attributes))
+
+                // 3) 如果 loader 把頂點色叫做 'COLOR_0'，手動複製到 'color'
+                scene.traverse((o) => {
+                    if (o.isMesh)
+                        console.log(Object.keys(o.geometry.attributes))
+                })
+
+                // 1) 开启顶点色，用 smooth shading（flatShading=false）
+                const mats = Array.isArray(mesh.material)
+                    ? (mesh.material as THREE.Material[])
+                    : [mesh.material as THREE.MeshStandardMaterial]
+                mats.forEach((m) => {
+                    const mat = m as THREE.MeshStandardMaterial
+                    mat.vertexColors = true
+                    mat.flatShading = false // ★ smooth shading
+                    mat.side = THREE.DoubleSide // ★ 双面，和 Open3D 一样
+                    mat.needsUpdate = true
+                })
+
+                mesh.castShadow = true
+                mesh.receiveShadow = true
+            }
         })
 
-        mesh.castShadow = mesh.receiveShadow = true
-      }
-    })
-    return root
-  }, [scene])
+        root.traverse((o) => {
+            if ((o as THREE.Mesh).isMesh) {
+                const mat = (o as THREE.Mesh)
+                    .material as THREE.MeshStandardMaterial
+                console.log(mat.vertexColors) // 應該印 true 或 2（VertexColors 常數）
+            }
+        })
 
-  /* 讓 OrbitControls 的焦點永遠在 (0,0,0) */
-  useLayoutEffect(() => {
-    controls?.target.set(0, 0, 0)
-  }, [controls])
+        return root
+    }, [scene])
 
-  return (
-    <Bounds fit clip observe margin={1.2}>
-      <primitive object={prepared} />
-    </Bounds>
-  )
+    /* 讓 OrbitControls 的焦點永遠在 (0,0,0) */
+    useLayoutEffect(() => {
+        controls?.target.set(0, 0, 0)
+    }, [controls])
+
+    return (
+        <Bounds fit clip observe margin={1.2}>
+            <primitive object={prepared} />
+        </Bounds>
+    )
 }
 useGLTF.preload(SCENE_URL)
 
 /* ---------------- 2) 畫布 + 光源 ---------------- */
 export default function SceneView() {
-  return (
-    <div className="scene-container" style={{ width: '100%', height: '100%' }}>
-      <Canvas camera={{ position: [0, 0, 1500], near: 0.1, far: 1e4 }} gl={{outputColorSpace: THREE.SRGBColorSpace}}>
-        <color attach="background" args={['#dcdcdc']} />
-        {/*💡→ 光打亮一點 ←💡*/}
-        <ambientLight intensity={0.5} />
-        <directionalLight
-          position={[500, 800, 1000]}
-          intensity={2.3}
-        />
+    return (
+        <div
+            className="scene-container"
+            style={{ width: '100%', height: '100%' }}
+        >
+            <Canvas
+                camera={{ position: [0, 0, 1500], near: 0.1, far: 1e4 }}
+                gl={{
+                    outputColorSpace: THREE.SRGBColorSpace,
+                    toneMapping: THREE.ACESFilmicToneMapping, // 线性映射更接近 Notebook
+                    toneMappingExposure: 1, // 默认曝光
+                }}
+            >
+                {/* 灰底 + 半球光 (上白下蓝) */}
+                <color attach="background" args={['#dcdcdc']} />
+                <hemisphereLight
+                    skyColor={[1, 1, 1]} // 上方白光
+                    groundColor={[0.2, 0.2, 0.6]} // 下方蓝光
+                    intensity={0.6}
+                />
+                <directionalLight position={[500, 800, 1000]} intensity={1.5} />
 
-        <Suspense fallback={null}>
-          <Etoile />
-          {/* HDRI 只當反射背景用 */}
-          <Environment preset="sunset" intensity={1} />
-        </Suspense>
+                {/* —— 新增 Head-light + Ambient —— */}
+                {/* 1) 在摄像机正前方打一盏 Head-light，保证朝你看的面不全黑 */}
+                <directionalLight
+                    position={[0, 0, 1500]}
+                    intensity={0.5}
+                    // 指向场景中心
+                    target-position={[0, 0, 0]}
+                />
 
-        <OrbitControls makeDefault />
-      </Canvas>
-    </div>
-  )
+                {/* 2) 微弱 Ambient 或者直接用 ambientLight */}
+                <ambientLight intensity={0.2} />
+
+                <Suspense fallback={null}>
+                    <Etoile /> {/* 只包含顶点色 & flatShading 材质 */}
+                </Suspense>
+
+                <OrbitControls makeDefault />
+            </Canvas>
+        </div>
+    )
 }
