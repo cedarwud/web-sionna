@@ -616,13 +616,13 @@ function App() {
             )}
             {/* 渲染可視化組件 */}
             <SceneView />
-            <SceneViewer
-                devices={tempDevices}
-                refreshDeviceData={refreshDeviceData}
-            />
-            <ConstellationViewer />
         </>
     )
+    // <SceneViewer
+    //     devices={tempDevices}
+    //     refreshDeviceData={refreshDeviceData}
+    // />
+    // <ConstellationViewer />
 
     return (
         <div className="App">

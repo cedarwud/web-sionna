@@ -22,11 +22,22 @@ function Etoile() {
 
         // ─── 2.1 載入並設定地板貼圖 ────────────────────────────────
         const loader = new TextureLoader()
-        const groundTex = loader.load('/textures/ground.png')
-        const normalTex = loader.load('/textures/ground_normal.png')
-        const roughnessTex = loader.load('/textures/ground_roughness.png')
+        const groundTex = loader.load('/textures/groundTex.png')
+        const normalTex = loader.load('/textures/normalTex.png')
+        const roughnessTex = loader.load('/textures/roughnessTex.png')
+        const displacementTex = loader.load('/textures/displacementTex.png')
+        const aoTex = loader.load('/textures/aoTex.png')
         // 把它們放進一個陣列，並明確標注為 Texture[]
-        const textures: THREE.Texture[] = [groundTex, normalTex, roughnessTex]
+        const textures: THREE.Texture[] = [
+            groundTex,
+            normalTex,
+            roughnessTex,
+            displacementTex,
+            aoTex,
+        ]
+
+        groundTex.repeat.set(60, 60) // ↑更多重複，顆粒看起來更細
+        roughnessTex.repeat.set(60, 60)
 
         textures.forEach((tex: THREE.Texture) => {
             // 單獨設定 wrapS、wrapT
@@ -66,16 +77,43 @@ function Etoile() {
                 map: groundTex,
                 normalMap: normalTex,
                 roughnessMap: roughnessTex,
+                displacementMap: displacementTex,
+                displacementScale: 5,
+                aoMap: aoTex,
+                aoMapIntensity: 1.5,
+                displacementScale: 5, // ← 擠出高度量 (可從 1→20 微調)
+                displacementBias: -2, // ← 讓整體往下移避免浮在空中
                 color: 0xffffff,
                 roughness: 1.0,
                 metalness: 0.0,
                 emissive: 0x555555,
                 emissiveIntensity: 0.3,
                 vertexColors: false,
-                normalScale: new THREE.Vector2(0.2, 0.2),
+                normalScale: new THREE.Vector2(0.5, 0.5),
             })
             groundMesh.receiveShadow = true // ← 地板接收陰影
             groundMesh.castShadow = false // ← 地板本身不投影到自己        }
+
+            const geom = groundMesh.geometry as THREE.BufferGeometry
+            const uvAttr = geom.attributes.uv as
+                | THREE.BufferAttribute
+                | undefined
+
+            if (uvAttr) {
+                // 如果確定有 uv，就設第二組 uv2
+                geom.setAttribute(
+                    'uv2',
+                    new THREE.BufferAttribute(
+                        uvAttr.array,
+                        uvAttr.itemSize,
+                        uvAttr.normalized
+                    )
+                )
+            } else {
+                console.warn('groundMesh 沒有 UV，跳過 aoMap 設定')
+                // 如果一定要用 AO，可以改用全局 AO 或 ContactShadows，不用靠 aoMap
+                groundMesh.material.aoMap = undefined
+            }
         }
 
         useLayoutEffect(() => {
@@ -128,6 +166,14 @@ export default function SceneView() {
                     shadow-camera-right={-1000}
                     shadow-bias={-0.0002}
                     shadow-radius={10}
+                />
+                <directionalLight
+                    castShadow
+                    position={[20, 5, 20]} // 低角度，從側面掃射
+                    intensity={0.8}
+                    shadow-mapSize-width={2048}
+                    shadow-mapSize-height={2048}
+                    shadow-bias={-0.0002}
                 />
                 <directionalLight position={[-5, -10, -5]} intensity={0.8} />
                 <Suspense fallback={null}>
