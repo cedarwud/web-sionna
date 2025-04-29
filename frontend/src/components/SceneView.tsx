@@ -86,33 +86,31 @@ export default function SceneView() {
                 camera={{ position: [0, 0, 1500], near: 0.1, far: 1e4 }}
                 gl={{
                     outputColorSpace: THREE.SRGBColorSpace,
-                    toneMapping: THREE.ACESFilmicToneMapping, // 线性映射更接近 Notebook
-                    toneMappingExposure: 1, // 默认曝光
+                    toneMapping: THREE.ACESFilmicToneMapping,
+                    toneMappingExposure: 2.5,
+                    physicallyCorrectLights: true,
                 }}
             >
-                {/* 灰底 + 半球光 (上白下蓝) */}
-                <color attach="background" args={['#dcdcdc']} />
-                <hemisphereLight
-                    skyColor={[1, 1, 1]} // 上方白光
-                    groundColor={[0.2, 0.2, 0.6]} // 下方蓝光
-                    intensity={0.6}
-                />
-                <directionalLight position={[500, 800, 1000]} intensity={1.5} />
+                <color attach="background" args={['#ffffff']} />
 
-                {/* —— 新增 Head-light + Ambient —— */}
-                {/* 1) 在摄像机正前方打一盏 Head-light，保证朝你看的面不全黑 */}
+                {/* 增強版光源 */}
+                <hemisphereLight
+                    skyColor={[1, 1, 1]}
+                    groundColor={[0.2, 0.2, 0.6]}
+                    intensity={1.2}
+                />
+                <directionalLight position={[500, 800, 1000]} intensity={3.0} />
                 <directionalLight
                     position={[0, 0, 1500]}
-                    intensity={0.5}
-                    // 指向场景中心
+                    intensity={1.0}
                     target-position={[0, 0, 0]}
                 />
-
-                {/* 2) 微弱 Ambient 或者直接用 ambientLight */}
-                <ambientLight intensity={0.2} />
+                <ambientLight intensity={0.4} />
 
                 <Suspense fallback={null}>
-                    <Etoile /> {/* 只包含顶点色 & flatShading 材质 */}
+                    <Etoile />
+                    {/* 如果想要環境反射，也可以打開 */}
+                    {/* <Environment preset="city" intensity={1.5} /> */}
                 </Suspense>
 
                 <OrbitControls makeDefault />
