@@ -31,14 +31,26 @@ const INT_MATERIAL = new THREE.MeshStandardMaterial({
 })
 const DEVICE_SIZE = 5
 
-// 定義射線材質
+// 定義射線材質 - 線寬度增加
 const RAY_MATERIAL = new THREE.LineBasicMaterial({
-    color: 0xffff00,
-    linewidth: 1,
+    color: 0xffaa00, // 改為橙黃色
+    linewidth: 5, // 增加線寬 - 注意: Three.js的linewidth在大多數WebGL實現中最大為1
 })
 const LOS_MATERIAL = new THREE.LineBasicMaterial({
-    color: 0x00ff00,
-    linewidth: 2,
+    color: 0x00ffaa, // 改為青綠色
+    linewidth: 5, // 增加線寬
+})
+
+// 新增: 箭頭輔助物材質
+const ARROW_MATERIAL = new THREE.MeshBasicMaterial({
+    color: 0xffff00,
+})
+
+// 新增: 全向天線輻射材質
+const RADIATION_MATERIAL = new THREE.MeshBasicMaterial({
+    color: 0x00aaff,
+    transparent: true,
+    opacity: 0.2,
 })
 
 interface EtoileProps {
@@ -49,7 +61,7 @@ interface EtoileProps {
 function Etoile({ devices = [] }: EtoileProps) {
     const { scene } = useGLTF(SCENE_URL) as GLTF
     const { controls } = useThree()
-    const [rays, setRays] = useState<THREE.Line[]>([])
+    const [rays, setRays] = useState<THREE.Object3D[]>([]) // 修改為Object3D以支援多種3D物件
 
     // 將useLayoutEffect從useMemo中移出，放在組件頂層
     useLayoutEffect(() => {
@@ -180,35 +192,127 @@ function Etoile({ devices = [] }: EtoileProps) {
         // 獲取射線路徑數據
         const fetchRayData = async () => {
             try {
+                console.log('正在獲取射線路徑數據...')
                 const response = await fetch('/api/v1/sionna/ray-paths')
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`)
                 }
                 const data = await response.json()
+                console.log('獲取到射線路徑數據:', data)
 
                 // 創建射線物件
-                const newRays: THREE.Line[] = []
+                const newRays: THREE.Object3D[] = []
 
                 if (data && Array.isArray(data.paths)) {
-                    data.paths.forEach((path) => {
+                    console.log(`將創建 ${data.paths.length} 條射線路徑`)
+
+                    data.paths.forEach((path, index) => {
                         if (
                             path.points &&
                             Array.isArray(path.points) &&
                             path.points.length >= 2
                         ) {
+                            // 使用自定義寬度 (如果有提供)
+                            const lineWidth =
+                                path.width || (path.is_los ? 3 : 1.5)
+
+                            // 創建自定義材質，使用不同顏色
+                            const color = path.is_los ? 0x00ffaa : 0xffaa00
+                            const material = new THREE.LineBasicMaterial({
+                                color: color,
+                                linewidth: 1, // WebGL限制
+                            })
+
+                            // 從後端獲取的點座標
                             const points = path.points.map(
                                 (point) =>
                                     new THREE.Vector3(point.x, point.z, point.y)
                             )
+
+                            // 創建主射線
                             const geometry =
                                 new THREE.BufferGeometry().setFromPoints(points)
-                            const material = path.is_los
-                                ? LOS_MATERIAL
-                                : RAY_MATERIAL
                             const line = new THREE.Line(geometry, material)
+
+                            // 採用管道方式來創建有粗細的線
+                            const curve = new THREE.CatmullRomCurve3(points)
+                            const tubeGeometry = new THREE.TubeGeometry(
+                                curve, // 路徑曲線
+                                20, // 路徑分段數
+                                lineWidth * 0.3, // 管道半徑，用於控制粗細
+                                8, // 管道截面分段數
+                                false // 是否閉合
+                            )
+                            const tubeMaterial = new THREE.MeshBasicMaterial({
+                                color: color,
+                                transparent: true,
+                                opacity: 0.6,
+                            })
+                            const tube = new THREE.Mesh(
+                                tubeGeometry,
+                                tubeMaterial
+                            )
+
+                            // 創建方向箭頭 (在每個線段中間)
+                            for (let i = 0; i < points.length - 1; i++) {
+                                const start = points[i]
+                                const end = points[i + 1]
+                                const direction =
+                                    new THREE.Vector3().subVectors(end, start)
+                                const length = direction.length()
+                                direction.normalize()
+
+                                // 箭頭位置 (線段中點)
+                                const arrowPos = new THREE.Vector3().addVectors(
+                                    start,
+                                    direction
+                                        .clone()
+                                        .multiplyScalar(length * 0.5)
+                                )
+
+                                // 創建箭頭
+                                const arrowHelper = new THREE.ArrowHelper(
+                                    direction,
+                                    arrowPos,
+                                    length * 0.2, // 箭頭長度
+                                    color,
+                                    length * 0.1, // 頭部長度
+                                    length * 0.05 // 頭部寬度
+                                )
+
+                                newRays.push(arrowHelper)
+                            }
+
+                            // 如果是發射器相關的射線，添加全向輻射球
+                            if (path.points.length > 0 && index % 3 === 0) {
+                                // 每三條路徑添加一個球
+                                const startPoint = points[0] // 發射器位置
+
+                                // 創建輻射球
+                                const radiationGeometry =
+                                    new THREE.SphereGeometry(10, 16, 16)
+                                const radiationMaterial =
+                                    new THREE.MeshBasicMaterial({
+                                        color: color,
+                                        transparent: true,
+                                        opacity: 0.1,
+                                        wireframe: true,
+                                    })
+                                const radiationSphere = new THREE.Mesh(
+                                    radiationGeometry,
+                                    radiationMaterial
+                                )
+                                radiationSphere.position.copy(startPoint)
+                                newRays.push(radiationSphere)
+                            }
+
+                            // 所有物件添加到陣列
                             newRays.push(line)
+                            newRays.push(tube)
                         }
                     })
+
+                    console.log(`成功創建 ${newRays.length} 個射線相關物件`)
                 }
 
                 setRays(newRays)

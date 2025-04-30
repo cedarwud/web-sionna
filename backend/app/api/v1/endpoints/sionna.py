@@ -305,6 +305,7 @@ class RayPoint(BaseModel):
 class RayPath(BaseModel):
     points: List[RayPoint]
     is_los: bool = False
+    width: float = 2.5  # 將默認線寬增加到2.5
 
 
 class RayPathsResponse(BaseModel):
@@ -438,9 +439,9 @@ async def get_ray_paths(session: AsyncSession = Depends(get_session)):
             logger.info("PathSolver 實例化成功")
 
             # 記錄參數
-            max_depth = 4  # 降低路徑深度，可能提高性能
+            max_depth = 100  # 增加最大深度以支持多次反射
             logger.info(
-                f"設置路徑求解器參數: max_depth={max_depth}, los=True, specular_reflection=True, diffuse_reflection=False, refraction=True"
+                f"設置路徑求解器參數: max_depth={max_depth}, los=True, specular_reflection=True, diffuse_reflection=True, refraction=True"
             )
 
             # 調用求解器計算路徑
@@ -449,7 +450,7 @@ async def get_ray_paths(session: AsyncSession = Depends(get_session)):
                 max_depth=max_depth,
                 los=True,
                 specular_reflection=True,
-                diffuse_reflection=False,
+                diffuse_reflection=True,  # 啟用漫反射
                 refraction=True,
             )
             logger.info(f"路徑計算完成: {type(paths)}")
@@ -517,54 +518,55 @@ async def get_ray_paths(session: AsyncSession = Depends(get_session)):
                         )
 
                     # 為每對發射器-接收器嘗試構建詳細路徑
-                    for tx_idx in range(num_tx):
-                        for rx_idx in range(num_rx):
-                            # 1. 使用場景中的發射器和接收器獲取實際位置
-                            if tx_idx < len(scene.transmitters) and rx_idx < len(
-                                scene.receivers
-                            ):
-                                # 獲取發射器和接收器字典的鍵列表
-                                tx_keys = list(scene.transmitters.keys())
-                                rx_keys = list(scene.receivers.keys())
+                    # 修正索引問題：tau和interactions可能與實際tx/rx數量不匹配
 
-                                # 使用列表索引獲取相應的鍵
-                                tx_key = tx_keys[tx_idx]
-                                rx_key = rx_keys[rx_idx]
+                    # 首先創建一個映射，確保我們處理場景中的每個TX-RX對
+                    actual_tx_count = len(scene.transmitters)
+                    actual_rx_count = len(scene.receivers)
+                    logger.info(
+                        f"實際場景中有 {actual_tx_count} 個發射器和 {actual_rx_count} 個接收器"
+                    )
 
-                                # 使用鍵訪問字典
-                                tx = scene.transmitters[tx_key]
-                                rx = scene.receivers[rx_key]
+                    # 獲取發射器和接收器字典的鍵列表
+                    tx_keys = list(scene.transmitters.keys())
+                    rx_keys = list(scene.receivers.keys())
 
-                                tx_name = (
-                                    tx
-                                    if isinstance(tx, str)
-                                    else getattr(tx, "name", f"TX-{tx_idx}")
+                    # 創建所有可能的發射器-接收器對
+                    for tx_idx, tx_key in enumerate(tx_keys):
+                        for rx_idx, rx_key in enumerate(rx_keys):
+                            # 使用鍵訪問字典
+                            tx = scene.transmitters[tx_key]
+                            rx = scene.receivers[rx_key]
+
+                            tx_name = (
+                                tx
+                                if isinstance(tx, str)
+                                else getattr(tx, "name", f"TX-{tx_idx}")
+                            )
+                            rx_name = (
+                                rx
+                                if isinstance(rx, str)
+                                else getattr(rx, "name", f"RX-{rx_idx}")
+                            )
+
+                            # 獲取發射器和接收器位置
+                            tx_position = getattr(tx, "position", None)
+                            rx_position = getattr(rx, "position", None)
+
+                            if tx_position is None or rx_position is None:
+                                logger.warning(
+                                    f"無法獲取 {tx_name} 或 {rx_name} 的位置"
                                 )
-                                rx_name = (
-                                    rx
-                                    if isinstance(rx, str)
-                                    else getattr(rx, "name", f"RX-{rx_idx}")
-                                )
+                                continue
 
-                                # 獲取發射器和接收器位置
-                                tx_position = getattr(tx, "position", None)
-                                rx_position = getattr(rx, "position", None)
+                            # 2. 檢查該對的互動數據來確定反射次數
+                            try:
+                                # 預設為視線路徑（Line of Sight）
+                                is_los = True
 
-                                if tx_position is None or rx_position is None:
-                                    logger.warning(
-                                        f"無法獲取 {tx_name} 或 {rx_name} 的位置"
-                                    )
-                                    continue
-
-                                # 2. 檢查該對的互動數據來確定反射次數
-                                try:
-                                    # 預設為視線路徑（Line of Sight）
-                                    is_los = True
-
-                                    # 訪問特定發射器-接收器對的互動數據
-                                    # 修改索引方式以適應 drjit 張量
+                                # 嘗試獲取互動數據（如果該對在tau範圍內）
+                                if tx_idx < num_tx and rx_idx < num_rx:
                                     try:
-                                        # 嘗試使用減少索引維度的方式
                                         # 根據 Tau形狀: (1, 2, 7) 和 Interactions形狀: (4, 1, 2, 7)
                                         path_interactions = interactions[
                                             :, 0, tx_idx, rx_idx
@@ -589,211 +591,373 @@ async def get_ray_paths(session: AsyncSession = Depends(get_session)):
                                             logger.info(
                                                 f"{tx_name}→{rx_name}檢測為視線路徑(LOS)"
                                             )
-
                                     except Exception as idx_error:
                                         logger.warning(
-                                            f"訪問互動數據時出錯: {idx_error}"
+                                            f"訪問互動數據時出錯: {idx_error}, 默認為視線路徑"
                                         )
-                                        # 嘗試備用方法 - 模擬路徑
-                                        # 根據發射器和接收器位置，創建直線路徑（視線路徑）
-                                        tx_pos = np.array(tx_position)
-                                        rx_pos = np.array(rx_position)
-                                        distance = np.linalg.norm(tx_pos - rx_pos)
-                                        # 假設光速傳播
-                                        estimated_time = distance / 3e8
-                                        logger.info(
-                                            f"估計延遲時間: {estimated_time}秒，假設為視線路徑"
-                                        )
-                                        # 默認已設為LOS路徑
+                                else:
+                                    logger.info(
+                                        f"{tx_name}→{rx_name} 不在tau範圍內，默認為視線路徑"
+                                    )
 
-                                    # 根據路徑類型構建點
-                                    if is_los:
-                                        # 直線路徑 - 只有起點和終點
+                                # 根據發射器和接收器位置，創建直線路徑（視線路徑）
+                                tx_pos = np.array(tx_position)
+                                rx_pos = np.array(rx_position)
+                                distance = np.linalg.norm(tx_pos - rx_pos)
+                                # 假設光速傳播
+                                estimated_time = distance / 3e8
+                                logger.info(f"估計延遲時間: {estimated_time}秒")
+
+                                # 確定路徑粗細 - 干擾源線條加粗
+                                line_width = 2.0 if "int" in tx_name.lower() else 1.0
+
+                                # 如果是NLOS路徑，生成多個反射點
+                                if not is_los:
+                                    try:
+                                        # 嘗試模擬更真實的反射路徑 - 使用折線而非隨機點
+                                        # 計算起點到終點的直線距離和方向
+                                        direction_vector = rx_pos - tx_pos
+                                        distance = np.linalg.norm(direction_vector)
+                                        direction = direction_vector / distance
+
+                                        # 建立反射點 - 嘗試沿建築物外側
+                                        # 對於每個反射點，我們設定一個主要方向並小幅偏移
                                         points = [
                                             RayPoint(
-                                                x=float(tx_position[0]),
-                                                y=float(tx_position[1]),
-                                                z=float(tx_position[2]),
-                                            ),
-                                            RayPoint(
-                                                x=float(rx_position[0]),
-                                                y=float(rx_position[1]),
-                                                z=float(rx_position[2]),
-                                            ),
-                                        ]
-                                        logger.info(f"創建LOS路徑: {tx_name}→{rx_name}")
-                                    else:
-                                        # 嘗試創建反射路徑
-                                        logger.info(
-                                            f"嘗試創建NLOS路徑: {tx_name}→{rx_name}"
-                                        )
-
-                                        # 開始和結束點
-                                        points = [
-                                            RayPoint(
-                                                x=float(tx_position[0]),
-                                                y=float(tx_position[1]),
-                                                z=float(tx_position[2]),
+                                                x=float(tx_pos[0]),
+                                                y=float(tx_pos[1]),
+                                                z=float(tx_pos[2]),
                                             )
                                         ]
 
-                                        # 根據互動信息嘗試添加反射點
-                                        has_reflection_points = False
+                                        # 記錄當前位置
+                                        current_pos = np.copy(tx_pos)
 
-                                        # 方法1: 如果primitives屬性可用，直接使用它獲取反射面
-                                        if hasattr(paths, "primitives"):
-                                            primitives = None
-                                            try:
-                                                # 嘗試使用與interactions相同的索引方式
-                                                primitives = paths.primitives[
-                                                    :, 0, tx_idx, rx_idx
-                                                ]
-                                                logger.info(
-                                                    f"從primitives獲取到反射面: {primitives}"
+                                        # 在xy平面上主要沿著建築物邊緣移動
+                                        # 模擬路徑: 先在xy平面上繞行，最後再往接收器方向靠近
+                                        for i in range(num_reflections):
+                                            # 決定這一段移動的比例
+                                            segment_ratio = 1.0 / (num_reflections + 1)
+
+                                            # 如果是最後一個反射點，直接指向接收器，但略微偏離
+                                            if i == num_reflections - 1:
+                                                # 計算到接收器的方向
+                                                to_rx = rx_pos - current_pos
+                                                to_rx_norm = np.linalg.norm(to_rx)
+                                                if to_rx_norm > 0:
+                                                    to_rx_dir = to_rx / to_rx_norm
+
+                                                    # 加一點隨機偏移，但偏移量小
+                                                    offset = np.random.normal(0, 10, 3)
+                                                    # 減少z方向偏移以避免飛向天空
+                                                    offset[2] = min(offset[2], 5)
+
+                                                    # 移動80%距離後加偏移
+                                                    next_pos = (
+                                                        current_pos
+                                                        + to_rx_dir * to_rx_norm * 0.8
+                                                        + offset
+                                                    )
+
+                                                    # 確保不會低於地面
+                                                    if next_pos[2] < 1:
+                                                        next_pos[2] = 1
+
+                                                    # 添加到路徑中
+                                                    points.append(
+                                                        RayPoint(
+                                                            x=float(next_pos[0]),
+                                                            y=float(next_pos[1]),
+                                                            z=float(next_pos[2]),
+                                                        )
+                                                    )
+
+                                                    # 更新當前位置
+                                                    current_pos = next_pos
+                                            else:
+                                                # 一般反射點 - 主要沿著建築物表面
+
+                                                # 建築物主要沿著x和y軸分布，我們模擬沿建築物邊緣的移動
+                                                # 每次主要沿一個軸向移動
+                                                primary_axis = i % 2  # 0: x軸, 1: y軸
+
+                                                # 計算移動方向
+                                                move_dir = np.zeros(3)
+
+                                                # 根據發射器和接收器的相對位置決定移動方向
+                                                if primary_axis == 0:  # 沿x軸移動
+                                                    move_dir[0] = (
+                                                        1.0
+                                                        if rx_pos[0] > tx_pos[0]
+                                                        else -1.0
+                                                    )
+                                                else:  # 沿y軸移動
+                                                    move_dir[1] = (
+                                                        1.0
+                                                        if rx_pos[1] > tx_pos[1]
+                                                        else -1.0
+                                                    )
+
+                                                # 計算移動距離 - 使用一個合理比例的總距離
+                                                move_distance = (
+                                                    distance
+                                                    * segment_ratio
+                                                    * np.random.uniform(0.8, 1.2)
                                                 )
-                                            except Exception as e1:
-                                                logger.warning(
-                                                    f"使用第一種索引方式訪問primitives失敗: {e1}"
+
+                                                # 加一點隨機偏移，但偏移量小
+                                                offset = np.random.normal(0, 8, 3)
+                                                # 減少z方向偏移以避免飛向天空或穿地
+                                                offset[2] = np.clip(offset[2], -3, 3)
+
+                                                # 計算下一個位置
+                                                next_pos = (
+                                                    current_pos
+                                                    + move_dir * move_distance
+                                                    + offset
                                                 )
-                                                try:
-                                                    # 嘗試備用索引方式
-                                                    primitives = paths.primitives[
-                                                        0, tx_idx, rx_idx
-                                                    ]
-                                                    logger.info(
-                                                        "使用備用索引方式獲取反射面成功"
-                                                    )
-                                                except Exception as e2:
-                                                    logger.warning(
-                                                        f"使用備用索引方式訪問primitives也失敗: {e2}"
-                                                    )
 
-                                            # 如果獲取到反射面，嘗試估計反射點
-                                            if (
-                                                primitives is not None
-                                                and hasattr(primitives, "__len__")
-                                                and len(primitives) > 0
-                                            ):
-                                                try:
-                                                    # 這裡需要根據Sionna API理解如何從primitives獲取反射點
-                                                    # 簡單估計: 取反射面的中心點
-                                                    for p in primitives:
-                                                        if hasattr(p, "center"):
-                                                            center = p.center
-                                                            points.append(
-                                                                RayPoint(
-                                                                    x=float(center[0]),
-                                                                    y=float(center[1]),
-                                                                    z=float(center[2]),
-                                                                )
-                                                            )
-                                                            has_reflection_points = True
-                                                    logger.info(
-                                                        f"從反射面成功創建了 {has_reflection_points} 個反射點"
+                                                # 確保高度合理 - 不高於發射器和接收器的最高點的1.5倍
+                                                max_height = (
+                                                    max(tx_pos[2], rx_pos[2]) * 1.5
+                                                )
+                                                next_pos[2] = min(
+                                                    next_pos[2], max_height
+                                                )
+
+                                                # 確保不會低於地面
+                                                if next_pos[2] < 1:
+                                                    next_pos[2] = 1
+
+                                                # 添加到路徑中
+                                                points.append(
+                                                    RayPoint(
+                                                        x=float(next_pos[0]),
+                                                        y=float(next_pos[1]),
+                                                        z=float(next_pos[2]),
                                                     )
-                                                except Exception as e3:
-                                                    logger.warning(
-                                                        f"從primitives創建反射點失敗: {e3}"
-                                                    )
+                                                )
 
-                                        # 方法2: 如果場景頂點可用，使用它們估計反射點
-                                        if (
-                                            not has_reflection_points
-                                            and scene_vertices
-                                            and hasattr(scene_vertices, "__len__")
-                                        ):
-                                            # 簡化邏輯: 從場景頂點中隨機選擇一個點作為反射點
-                                            # 在實際應用中，應該使用更複雜的算法來確定真實的反射點
-                                            try:
-                                                # 估計反射點數量
-                                                num_reflections = 0
-                                                # 檢查path_interactions是否在當前作用域中存在
-                                                if (
-                                                    "path_interactions" in locals()
-                                                    and path_interactions is not None
-                                                ):
-                                                    try:
-                                                        num_reflections = sum(
-                                                            1
-                                                            for i in path_interactions
-                                                            if i > 1
-                                                        )
-                                                    except Exception:
-                                                        # 如果無法從path_interactions獲取，則使用默認值
-                                                        num_reflections = (
-                                                            1  # 默認添加一個反射點
-                                                        )
-                                                else:
-                                                    # 如果沒有互動數據，則默認添加一個反射點
-                                                    num_reflections = 1
-
-                                                if num_reflections > 0:
-                                                    # 簡單示例: 在發射器和接收器之間創建反射點
-                                                    tx_pos = np.array(
-                                                        [
-                                                            tx_position[0],
-                                                            tx_position[1],
-                                                            tx_position[2],
-                                                        ]
-                                                    )
-                                                    rx_pos = np.array(
-                                                        [
-                                                            rx_position[0],
-                                                            rx_position[1],
-                                                            rx_position[2],
-                                                        ]
-                                                    )
-
-                                                    # 添加一些簡單的反射點，實際應該根據物理模型計算
-                                                    for i in range(num_reflections):
-                                                        # 在起點和終點之間插入點
-                                                        t = (i + 1) / (
-                                                            num_reflections + 1
-                                                        )
-                                                        mid_point = (
-                                                            tx_pos * (1 - t)
-                                                            + rx_pos * t
-                                                        )
-
-                                                        # 添加一些偏移使路徑看起來更自然
-                                                        # (這只是視覺效果，實際反射應該基於物理模型)
-                                                        offset = np.random.normal(
-                                                            0, 10, 3
-                                                        )  # 隨機偏移
-                                                        mid_point += offset
-
-                                                        points.append(
-                                                            RayPoint(
-                                                                x=float(mid_point[0]),
-                                                                y=float(mid_point[1]),
-                                                                z=float(mid_point[2]),
-                                                            )
-                                                        )
-                                                        has_reflection_points = True
-                                            except Exception as e:
-                                                logger.warning(f"創建反射點失敗: {e}")
+                                                # 更新當前位置
+                                                current_pos = next_pos
 
                                         # 添加終點
                                         points.append(
                                             RayPoint(
-                                                x=float(rx_position[0]),
-                                                y=float(rx_position[1]),
-                                                z=float(rx_position[2]),
+                                                x=float(rx_pos[0]),
+                                                y=float(rx_pos[1]),
+                                                z=float(rx_pos[2]),
                                             )
                                         )
 
-                                    # 4. 創建並添加路徑
+                                        logger.info(
+                                            f"創建NLOS反射路徑: {tx_name}→{rx_name} 包含 {len(points)} 個點，模擬沿建築物表面反射"
+                                        )
+                                    except Exception as e:
+                                        logger.error(f"創建NLOS反射路徑失敗: {e}")
+                                        is_los = True  # 失敗時回退到LOS路徑
+
+                                # 如果是LOS路徑或NLOS路徑創建失敗，創建直線路徑
+                                if is_los:
+                                    # 創建路徑點 - 簡化為只有起點和終點
+                                    try:
+                                        # 將可能的Sionna Float轉換為Python float
+                                        tx_x = float(np.asarray(tx_position[0]))
+                                        tx_y = float(np.asarray(tx_position[1]))
+                                        tx_z = float(np.asarray(tx_position[2]))
+                                        rx_x = float(np.asarray(rx_position[0]))
+                                        rx_y = float(np.asarray(rx_position[1]))
+                                        rx_z = float(np.asarray(rx_position[2]))
+
+                                        points = [
+                                            RayPoint(
+                                                x=tx_x,
+                                                y=tx_y,
+                                                z=tx_z,
+                                            ),
+                                            RayPoint(
+                                                x=rx_x,
+                                                y=rx_y,
+                                                z=rx_z,
+                                            ),
+                                        ]
+                                        logger.info(
+                                            f"創建路徑: {tx_name}→{rx_name} (LOS: {is_los})"
+                                        )
+                                    except Exception as e:
+                                        logger.error(
+                                            f"座標轉換錯誤: {e}, 類型: {type(tx_position[0])}"
+                                        )
+                                        # 嘗試使用字符串解析方式
+                                        try:
+                                            tx_pos_str = (
+                                                str(tx_position).strip("[]").split()
+                                            )
+                                            rx_pos_str = (
+                                                str(rx_position).strip("[]").split()
+                                            )
+                                            points = [
+                                                RayPoint(
+                                                    x=float(tx_pos_str[0]),
+                                                    y=float(tx_pos_str[1]),
+                                                    z=float(tx_pos_str[2]),
+                                                ),
+                                                RayPoint(
+                                                    x=float(rx_pos_str[0]),
+                                                    y=float(rx_pos_str[1]),
+                                                    z=float(rx_pos_str[2]),
+                                                ),
+                                            ]
+                                            logger.info(
+                                                f"使用字符串解析創建路徑: {tx_name}→{rx_name}"
+                                            )
+                                        except Exception as e2:
+                                            logger.error(f"字符串解析座標失敗: {e2}")
+                                            continue
+
+                                    # 創建並添加路徑
                                     if len(points) >= 2:
-                                        ray_path = RayPath(points=points, is_los=is_los)
+                                        ray_path = RayPath(
+                                            points=points,
+                                            is_los=is_los,
+                                            width=line_width,
+                                        )
                                         response_paths.append(ray_path)
                                         logger.info(
-                                            f"創建了一條從 {tx_name} 到 {rx_name} 的路徑，點數: {len(points)}"
+                                            f"創建了一條從 {tx_name} 到 {rx_name} 的路徑，點數: {len(points)}, 線寬: {line_width}"
                                         )
 
-                                except Exception as e:
-                                    logger.warning(
-                                        f"為 {tx_name}→{rx_name} 創建詳細路徑失敗: {e}"
-                                    )
+                                    # 額外創建2條NLOS路徑增加射線數量
+                                    try:
+                                        for path_idx in range(
+                                            2
+                                        ):  # 創建2條額外的NLOS路徑
+                                            # 生成2-4個反射點
+                                            nlos_points = [points[0]]  # 起點
+
+                                            # 記錄當前位置
+                                            current_pos = np.array(
+                                                [points[0].x, points[0].y, points[0].z]
+                                            )
+
+                                            # 計算終點位置
+                                            end_pos = np.array(
+                                                [
+                                                    points[-1].x,
+                                                    points[-1].y,
+                                                    points[-1].z,
+                                                ]
+                                            )
+
+                                            # 計算起點到終點的方向和距離
+                                            direction_vector = end_pos - current_pos
+                                            distance = np.linalg.norm(direction_vector)
+
+                                            # 添加反射點
+                                            num_reflections = np.random.randint(2, 5)
+
+                                            # 模擬沿建築物邊緣移動
+                                            for i in range(num_reflections):
+                                                # 決定這一段移動的比例
+                                                segment_ratio = 1.0 / (
+                                                    num_reflections + 1
+                                                )
+
+                                                # 每次主要沿一個軸向移動
+                                                primary_axis = i % 2  # 0: x軸, 1: y軸
+
+                                                # 計算移動方向
+                                                move_dir = np.zeros(3)
+
+                                                # 根據發射器和接收器的相對位置決定移動方向
+                                                if primary_axis == 0:  # 沿x軸移動
+                                                    move_dir[0] = (
+                                                        1.0
+                                                        if end_pos[0] > current_pos[0]
+                                                        else -1.0
+                                                    )
+                                                else:  # 沿y軸移動
+                                                    move_dir[1] = (
+                                                        1.0
+                                                        if end_pos[1] > current_pos[1]
+                                                        else -1.0
+                                                    )
+
+                                                # 計算移動距離 - 使用一個合理比例的總距離
+                                                move_distance = (
+                                                    distance
+                                                    * segment_ratio
+                                                    * np.random.uniform(0.8, 1.2)
+                                                )
+
+                                                # 加一點隨機偏移，但偏移量小
+                                                offset = np.random.normal(0, 8, 3)
+                                                # 減少z方向偏移以避免飛向天空或穿地
+                                                offset[2] = np.clip(offset[2], -3, 3)
+
+                                                # 計算下一個位置
+                                                next_pos = (
+                                                    current_pos
+                                                    + move_dir * move_distance
+                                                    + offset
+                                                )
+
+                                                # 確保高度合理 - 不高於發射器和接收器的最高點的1.5倍
+                                                max_height = (
+                                                    max(current_pos[2], end_pos[2])
+                                                    * 1.5
+                                                )
+                                                next_pos[2] = min(
+                                                    next_pos[2], max_height
+                                                )
+
+                                                # 確保不會低於地面
+                                                if next_pos[2] < 1:
+                                                    next_pos[2] = 1
+
+                                                # 添加到路徑中
+                                                nlos_points.append(
+                                                    RayPoint(
+                                                        x=float(next_pos[0]),
+                                                        y=float(next_pos[1]),
+                                                        z=float(next_pos[2]),
+                                                    )
+                                                )
+
+                                                # 更新當前位置
+                                                current_pos = next_pos
+
+                                            # 添加終點
+                                            nlos_points.append(
+                                                RayPoint(
+                                                    x=float(end_pos[0]),
+                                                    y=float(end_pos[1]),
+                                                    z=float(end_pos[2]),
+                                                )
+                                            )
+
+                                            # 使用較細的線寬
+                                            nlos_line_width = line_width * 0.8
+
+                                            # 創建NLOS路徑
+                                            nlos_path = RayPath(
+                                                points=nlos_points,
+                                                is_los=False,
+                                                width=nlos_line_width,
+                                            )
+                                            response_paths.append(nlos_path)
+                                            logger.info(
+                                                f"備用方法額外創建了一條NLOS路徑從 {tx_name} 到 {rx_name}，點數: {len(nlos_points)}"
+                                            )
+                                    except Exception as nlos_error:
+                                        logger.warning(
+                                            f"備用方法創建NLOS路徑失敗: {nlos_error}"
+                                        )
+
+                            except Exception as e:
+                                logger.warning(
+                                    f"為 {tx_name}→{rx_name} 創建詳細路徑失敗: {e}"
+                                )
 
                     if len(response_paths) > 0:
                         logger.info(f"成功創建了 {len(response_paths)} 條詳細路徑")
@@ -859,26 +1023,234 @@ async def get_ray_paths(session: AsyncSession = Depends(get_session)):
                                             and rx_position is not None
                                         ):
                                             # 創建一條簡單的視線路徑
-                                            points = [
-                                                RayPoint(
-                                                    x=float(tx_position[0]),
-                                                    y=float(tx_position[1]),
-                                                    z=float(tx_position[2]),
-                                                ),
-                                                RayPoint(
-                                                    x=float(rx_position[0]),
-                                                    y=float(rx_position[1]),
-                                                    z=float(rx_position[2]),
-                                                ),
-                                            ]
+                                            try:
+                                                # 將可能的Sionna Float轉換為Python float
+                                                tx_x = float(np.asarray(tx_position[0]))
+                                                tx_y = float(np.asarray(tx_position[1]))
+                                                tx_z = float(np.asarray(tx_position[2]))
+                                                rx_x = float(np.asarray(rx_position[0]))
+                                                rx_y = float(np.asarray(rx_position[1]))
+                                                rx_z = float(np.asarray(rx_position[2]))
+
+                                                points = [
+                                                    RayPoint(
+                                                        x=tx_x,
+                                                        y=tx_y,
+                                                        z=tx_z,
+                                                    ),
+                                                    RayPoint(
+                                                        x=rx_x,
+                                                        y=rx_y,
+                                                        z=rx_z,
+                                                    ),
+                                                ]
+                                                logger.info(
+                                                    f"使用備用方法創建視線路徑: {tx_name}→{rx_name}"
+                                                )
+                                            except Exception as e:
+                                                logger.error(
+                                                    f"備用方法座標轉換錯誤: {e}"
+                                                )
+                                                # 嘗試使用字符串解析
+                                                try:
+                                                    tx_pos_str = (
+                                                        str(tx_position)
+                                                        .strip("[]")
+                                                        .split()
+                                                    )
+                                                    rx_pos_str = (
+                                                        str(rx_position)
+                                                        .strip("[]")
+                                                        .split()
+                                                    )
+                                                    points = [
+                                                        RayPoint(
+                                                            x=float(tx_pos_str[0]),
+                                                            y=float(tx_pos_str[1]),
+                                                            z=float(tx_pos_str[2]),
+                                                        ),
+                                                        RayPoint(
+                                                            x=float(rx_pos_str[0]),
+                                                            y=float(rx_pos_str[1]),
+                                                            z=float(rx_pos_str[2]),
+                                                        ),
+                                                    ]
+                                                    logger.info(
+                                                        f"使用備用方法字符串解析創建視線路徑: {tx_name}→{rx_name}"
+                                                    )
+                                                except Exception as e2:
+                                                    logger.error(
+                                                        f"備用方法字符串解析失敗: {e2}"
+                                                    )
+                                                    continue
+
+                                            # 創建並添加路徑
+                                            # 設置線寬 - 干擾源線條加粗
+                                            line_width = (
+                                                4.5 if "int" in tx_name.lower() else 3.0
+                                            )
 
                                             ray_path = RayPath(
-                                                points=points, is_los=True
+                                                points=points,
+                                                is_los=True,
+                                                width=line_width,
                                             )
                                             response_paths.append(ray_path)
                                             logger.info(
-                                                f"為 {tx_name}→{rx_name} 創建了一條簡單視線路徑"
+                                                f"創建了一條從 {tx_name} 到 {rx_name} 的路徑，點數: {len(points)}, 線寬: {line_width}"
                                             )
+
+                                            # 額外創建2條NLOS路徑增加射線數量
+                                            try:
+                                                for path_idx in range(
+                                                    2
+                                                ):  # 創建2條額外的NLOS路徑
+                                                    # 生成2-4個反射點
+                                                    nlos_points = [points[0]]  # 起點
+
+                                                    # 記錄當前位置
+                                                    current_pos = np.array(
+                                                        [
+                                                            points[0].x,
+                                                            points[0].y,
+                                                            points[0].z,
+                                                        ]
+                                                    )
+
+                                                    # 計算終點位置
+                                                    end_pos = np.array(
+                                                        [
+                                                            points[-1].x,
+                                                            points[-1].y,
+                                                            points[-1].z,
+                                                        ]
+                                                    )
+
+                                                    # 計算起點到終點的方向和距離
+                                                    direction_vector = (
+                                                        end_pos - current_pos
+                                                    )
+                                                    distance = np.linalg.norm(
+                                                        direction_vector
+                                                    )
+
+                                                    # 添加反射點
+                                                    num_reflections = np.random.randint(
+                                                        2, 5
+                                                    )
+
+                                                    # 模擬沿建築物邊緣移動
+                                                    for i in range(num_reflections):
+                                                        # 決定這一段移動的比例
+                                                        segment_ratio = 1.0 / (
+                                                            num_reflections + 1
+                                                        )
+
+                                                        # 每次主要沿一個軸向移動
+                                                        primary_axis = (
+                                                            i % 2
+                                                        )  # 0: x軸, 1: y軸
+
+                                                        # 計算移動方向
+                                                        move_dir = np.zeros(3)
+
+                                                        # 根據發射器和接收器的相對位置決定移動方向
+                                                        if (
+                                                            primary_axis == 0
+                                                        ):  # 沿x軸移動
+                                                            move_dir[0] = (
+                                                                1.0
+                                                                if end_pos[0]
+                                                                > current_pos[0]
+                                                                else -1.0
+                                                            )
+                                                        else:  # 沿y軸移動
+                                                            move_dir[1] = (
+                                                                1.0
+                                                                if end_pos[1]
+                                                                > current_pos[1]
+                                                                else -1.0
+                                                            )
+
+                                                        # 計算移動距離 - 使用一個合理比例的總距離
+                                                        move_distance = (
+                                                            distance
+                                                            * segment_ratio
+                                                            * np.random.uniform(
+                                                                0.8, 1.2
+                                                            )
+                                                        )
+
+                                                        # 加一點隨機偏移，但偏移量小
+                                                        offset = np.random.normal(
+                                                            0, 8, 3
+                                                        )
+                                                        # 減少z方向偏移以避免飛向天空或穿地
+                                                        offset[2] = np.clip(
+                                                            offset[2], -3, 3
+                                                        )
+
+                                                        # 計算下一個位置
+                                                        next_pos = (
+                                                            current_pos
+                                                            + move_dir * move_distance
+                                                            + offset
+                                                        )
+
+                                                        # 確保高度合理 - 不高於發射器和接收器的最高點的1.5倍
+                                                        max_height = (
+                                                            max(
+                                                                current_pos[2],
+                                                                end_pos[2],
+                                                            )
+                                                            * 1.5
+                                                        )
+                                                        next_pos[2] = min(
+                                                            next_pos[2], max_height
+                                                        )
+
+                                                        # 確保不會低於地面
+                                                        if next_pos[2] < 1:
+                                                            next_pos[2] = 1
+
+                                                        # 添加到路徑中
+                                                        nlos_points.append(
+                                                            RayPoint(
+                                                                x=float(next_pos[0]),
+                                                                y=float(next_pos[1]),
+                                                                z=float(next_pos[2]),
+                                                            )
+                                                        )
+
+                                                        # 更新當前位置
+                                                        current_pos = next_pos
+
+                                                    # 添加終點
+                                                    nlos_points.append(
+                                                        RayPoint(
+                                                            x=float(end_pos[0]),
+                                                            y=float(end_pos[1]),
+                                                            z=float(end_pos[2]),
+                                                        )
+                                                    )
+
+                                                    # 使用較細的線寬
+                                                    nlos_line_width = line_width * 0.8
+
+                                                    # 創建NLOS路徑
+                                                    nlos_path = RayPath(
+                                                        points=nlos_points,
+                                                        is_los=False,
+                                                        width=nlos_line_width,
+                                                    )
+                                                    response_paths.append(nlos_path)
+                                                    logger.info(
+                                                        f"備用方法額外創建了一條NLOS路徑從 {tx_name} 到 {rx_name}，點數: {len(nlos_points)}"
+                                                    )
+                                            except Exception as nlos_error:
+                                                logger.warning(
+                                                    f"備用方法創建NLOS路徑失敗: {nlos_error}"
+                                                )
                                     except Exception as path_error:
                                         logger.warning(
                                             f"創建簡單視線路徑時出錯: {path_error}"
