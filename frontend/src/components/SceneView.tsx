@@ -9,9 +9,8 @@ import * as THREE from 'three'
 import { TextureLoader, RepeatWrapping, SRGBColorSpace } from 'three'
 import { Device } from '../App' // 從 App 引入前端 Device 介面
 
-// 修正 API 路徑，使用 GET 端點而非 POST 端點
-// 前端路徑帶 /api 前綴，vite 會將其重寫並代理到後端
-const SCENE_URL = '/api/v1/sionna/scene'
+// 修改: 直接使用靜態檔案路徑而非 API 端點，避免後端處理錯誤
+const SCENE_URL = '/static/models/XIN.glb'
 
 // 定義設備類型材質和尺寸
 const TX_MATERIAL = new THREE.MeshStandardMaterial({
@@ -78,14 +77,14 @@ function Etoile({ devices = [] }: EtoileProps) {
         const normalTex = loader.load('/textures/normalTex.png')
         const roughnessTex = loader.load('/textures/roughnessTex.png')
         const displacementTex = loader.load('/textures/displacementTex.png')
-        const aoTex = loader.load('/textures/aoTex.png')
+        // 移除 aoTex 載入，因為地板沒有 UV，無法使用 aoMap
+
         // 把它們放進一個陣列，並明確標注為 Texture[]
         const textures: THREE.Texture[] = [
             groundTex,
             normalTex,
             roughnessTex,
             displacementTex,
-            aoTex,
         ]
 
         groundTex.repeat.set(60, 60) // ↑更多重複，顆粒看起來更細
@@ -123,7 +122,7 @@ function Etoile({ devices = [] }: EtoileProps) {
             }
         })
 
-        // 2.2 覆寫地板為「貼圖 + 白色底」材質
+        // 2.2 覆寫地板為「貼圖 + 白色底」材質 - 移除 aoMap 相關設定
         if (groundMesh) {
             groundMesh.material = new THREE.MeshStandardMaterial({
                 map: groundTex,
@@ -131,14 +130,12 @@ function Etoile({ devices = [] }: EtoileProps) {
                 roughnessMap: roughnessTex,
                 displacementMap: displacementTex,
                 displacementScale: 5,
-                aoMap: aoTex,
-                aoMapIntensity: 1.5,
                 displacementBias: -2, // ← 讓整體往下移避免浮在空中
                 color: 0xffffff,
-                roughness: 1.0,
-                metalness: 0.0,
+                roughness: 0.8, // 增加粗糙度以補償缺少的 aoMap
+                metalness: 0.1,
                 emissive: 0x555555,
-                emissiveIntensity: 0.3,
+                emissiveIntensity: 0.4, // 稍微增加自發光強度以補償缺少的 aoMap
                 vertexColors: false,
                 normalScale: new THREE.Vector2(0.5, 0.5),
             })
@@ -146,35 +143,7 @@ function Etoile({ devices = [] }: EtoileProps) {
             groundMesh.castShadow = false // ← 地板本身不投影到自己
         }
 
-        const geom = groundMesh?.geometry as THREE.BufferGeometry | undefined
-        const uvAttr = geom?.attributes.uv as THREE.BufferAttribute | undefined
-
-        if (uvAttr) {
-            // 如果確定有 uv，就設第二組 uv2
-            geom?.setAttribute(
-                'uv2',
-                new THREE.BufferAttribute(
-                    uvAttr.array,
-                    uvAttr.itemSize,
-                    uvAttr.normalized
-                )
-            )
-        } else {
-            console.warn('groundMesh 沒有 UV，跳過 aoMap 設定')
-            // 如果一定要用 AO，可以改用全局 AO 或 ContactShadows，不用靠 aoMap
-            if (groundMesh) {
-                // 移除 aoMap 並調整材質
-                const material =
-                    groundMesh.material as THREE.MeshStandardMaterial
-                material.aoMap = undefined
-                material.aoMapIntensity = 0
-                // 可以調整其他材質參數以補償 AO 效果的缺失
-                material.roughness = 0.8
-                material.metalness = 0.1
-                material.emissiveIntensity = 0.4
-            }
-        }
-
+        // 移除 UV 相關代碼和警告，直接完成
         return root
     }, [scene])
 

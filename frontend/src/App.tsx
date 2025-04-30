@@ -110,9 +110,8 @@ function App() {
     const [apiStatus, setApiStatus] = useState<
         'disconnected' | 'connected' | 'error'
     >('disconnected')
-    const [selectedScene, setSelectedScene] = useState<string>('Etoile')
     const [hasTempDevices, setHasTempDevices] = useState<boolean>(false)
-    const [activeComponent, setActiveComponent] = useState<string>('2DRT')
+    const [activeComponent, setActiveComponent] = useState<string>('3DRT')
 
     // 從API獲取設備數據
     const fetchDevices = useCallback(async () => {

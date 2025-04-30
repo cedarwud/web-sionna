@@ -16,7 +16,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
     return (
         <nav className="navbar">
             <div className="navbar-container">
-                <div className="navbar-logo">Web Sionna</div>
+                <div className="navbar-logo">Sionna</div>
 
                 <div className="navbar-menu-toggle" onClick={toggleMenu}>
                     <span
@@ -31,7 +31,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                         }`}
                         onClick={() => onMenuClick('2DRT')}
                     >
-                        2D電波傳播圖
+                        2D RT
                     </li>
                     <li
                         className={`navbar-item ${
@@ -39,7 +39,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                         }`}
                         onClick={() => onMenuClick('3DRT')}
                     >
-                        3D電波傳播圖
+                        3D RT
                     </li>
                     <li
                         className={`navbar-item ${

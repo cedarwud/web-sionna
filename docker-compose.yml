@@ -16,13 +16,13 @@ services:
       - "${POSTGRES_PORT:-5432}:5432" # 將主機的某個端口映射到容器的 5432 (方便外部工具連接，可選)
     networks:
       - sionna-net
-    healthcheck: # 可選，但建議加上，讓 fastapi 等待 db 啟動完成
+    healthcheck: # 可選，但建議加上，讓 backend 等待 db 啟動完成
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  fastapi:
+  backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -64,7 +64,7 @@ services:
       start_period: 30s   # 啟動後等待 30 秒再開始健康檢查 (給 FastAPI 足夠的啟動時間)
 
 
-  react-swc:
+  frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -77,8 +77,8 @@ services:
     networks:
       - sionna-net
     depends_on: # React 通常依賴 FastAPI
-      fastapi: # <--- 修改依賴條件
-        condition: service_healthy # 等待 fastapi 健康檢查通過
+      backend: # <--- 修改依賴條件
+        condition: service_healthy # 等待 backend 健康檢查通過
 
 networks:
   sionna-net:

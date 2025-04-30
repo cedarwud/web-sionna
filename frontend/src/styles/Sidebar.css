@@ -106,6 +106,7 @@
 /* 操作按鈕 */
 .action-buttons {
   margin-bottom: 15px;
+  justify-content: space-between;
 }
 
 /* 設備列表 */

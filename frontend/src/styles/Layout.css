@@ -52,7 +52,7 @@
 /* 側邊欄切換按鈕 - 懸浮 */
 .sidebar-toggle {
   position: fixed;
-  top: 20px; /* 向下移動一點 */
+  top: 10px; /* 向下移動一點 */
   left: 20px; /* 向右移動一點 */
   width: 40px;
   height: 40px;
