@@ -119,34 +119,45 @@ body {
 .action-buttons {
   display: flex;
   gap: 10px;
+  margin: 10px 0;
+  padding: 0 10px;
 }
 
-.apply-button, .cancel-button {
-  padding: 6px 15px;
+.apply-button {
+  background-color: #4a7bff;
+  color: white;
   border: none;
+  padding: 8px 16px;
   border-radius: 4px;
   cursor: pointer;
   font-weight: bold;
 }
 
-.apply-button {
-  background-color: #4caf50;
-  color: white;
+.apply-button:hover:not(:disabled) {
+  background-color: #3a6be6;
 }
 
 .apply-button:disabled {
-  background-color: #8bc34a;
-  opacity: 0.5;
+  background-color: #8ca6e9;
   cursor: not-allowed;
 }
 
 .cancel-button {
   background-color: #f44336;
   color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.cancel-button:hover:not(:disabled) {
+  background-color: #d32f2f;
 }
 
 .cancel-button:disabled {
-  opacity: 0.5;
+  background-color: #e57373;
   cursor: not-allowed;
 }
 
@@ -258,4 +269,19 @@ button:disabled {
 .warning-message {
   width: 100%;
   box-sizing: border-box;
+}
+
+/* App container styles */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.content-wrapper {
+  flex: 1;
+  margin-top: 60px; /* 為Navbar騰出空間 */
+  overflow: hidden;
 }

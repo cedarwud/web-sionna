@@ -439,9 +439,9 @@ async def get_ray_paths(session: AsyncSession = Depends(get_session)):
             logger.info("PathSolver 實例化成功")
 
             # 記錄參數
-            max_depth = 100  # 增加最大深度以支持多次反射
+            max_depth = 5  # 增加最大深度以支持多次反射
             logger.info(
-                f"設置路徑求解器參數: max_depth={max_depth}, los=True, specular_reflection=True, diffuse_reflection=True, refraction=True"
+                f"設置路徑求解器參數: max_depth={max_depth}, los=True, specular_reflection=True, diffuse_reflection=False, refraction=False"
             )
 
             # 調用求解器計算路徑
@@ -450,8 +450,8 @@ async def get_ray_paths(session: AsyncSession = Depends(get_session)):
                 max_depth=max_depth,
                 los=True,
                 specular_reflection=True,
-                diffuse_reflection=True,  # 啟用漫反射
-                refraction=True,
+                diffuse_reflection=False,  # 啟用漫反射
+                refraction=False,
             )
             logger.info(f"路徑計算完成: {type(paths)}")
 

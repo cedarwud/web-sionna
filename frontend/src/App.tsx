@@ -3,6 +3,9 @@ import { useState, useEffect, useCallback } from 'react'
 import SceneView from './components/SceneView'
 import Layout from './components/Layout'
 import Sidebar from './components/Sidebar'
+import Navbar from './components/Navbar'
+import SceneViewer from './components/SceneViewer'
+import ConstellationViewer from './components/ConstellationViewer'
 import './App.css'
 import {
     Device as BackendDevice,
@@ -109,6 +112,7 @@ function App() {
     >('disconnected')
     const [selectedScene, setSelectedScene] = useState<string>('Etoile')
     const [hasTempDevices, setHasTempDevices] = useState<boolean>(false)
+    const [activeComponent, setActiveComponent] = useState<string>('2DRT')
 
     // 從API獲取設備數據
     const fetchDevices = useCallback(async () => {
@@ -572,62 +576,64 @@ function App() {
         }
     }
 
+    // 處理導航菜單點擊
+    const handleMenuClick = (component: string) => {
+        setActiveComponent(component)
+    }
+
+    // 渲染當前選中的組件
+    const renderActiveComponent = () => {
+        switch (activeComponent) {
+            case '2DRT':
+                return (
+                    <SceneViewer
+                        devices={tempDevices}
+                        refreshDeviceData={refreshDeviceData}
+                    />
+                )
+            case '3DRT':
+                return <SceneView devices={tempDevices} />
+            case 'constellation':
+                return <ConstellationViewer />
+            default:
+                return (
+                    <SceneViewer
+                        devices={tempDevices}
+                        refreshDeviceData={refreshDeviceData}
+                    />
+                )
+        }
+    }
+
     if (loading) {
         return <div className="loading">載入中...</div>
     }
 
     return (
-        <div className="App dark-theme">
-            <Layout
-                sidebar={
-                    <Sidebar
-                        devices={tempDevices}
-                        onDeviceChange={handleDeviceChange}
-                        onAddDevice={handleAddDevice}
-                        onDeleteDevice={handleDeleteDevice}
-                        loading={loading}
-                        apiStatus={apiStatus}
-                        onRefresh={refreshDeviceData}
-                    />
-                }
-                content={
-                    <div className="main-content">
-                        <div
-                            className="scene-controls"
-                            style={{ display: 'none' }}
-                        >
-                            <div className="action-buttons">
-                                <button
-                                    onClick={handleApply}
-                                    disabled={
-                                        loading ||
-                                        apiStatus !== 'connected' ||
-                                        !hasTempDevices
-                                    }
-                                    className="apply-button"
-                                >
-                                    套用
-                                </button>
-                                <button
-                                    onClick={handleCancel}
-                                    disabled={loading}
-                                    className="cancel-button"
-                                >
-                                    取消
-                                </button>
-                            </div>
-                        </div>
-
-                        <SceneView devices={tempDevices} />
-
-                        {error && (
-                            <div className="error-message">
-                                <p>{error}</p>
-                            </div>
-                        )}
-                    </div>
-                }
+        <div className="app-container">
+            <Navbar
+                onMenuClick={handleMenuClick}
+                activeComponent={activeComponent}
             />
+            <div className="content-wrapper">
+                <Layout
+                    sidebar={
+                        <Sidebar
+                            devices={tempDevices}
+                            onDeviceChange={handleDeviceChange}
+                            onDeleteDevice={handleDeleteDevice}
+                            onAddDevice={handleAddDevice}
+                            onApply={handleApply}
+                            onCancel={handleCancel}
+                            loading={loading}
+                            apiStatus={apiStatus}
+                            onRefresh={refreshDeviceData}
+                            hasTempDevices={hasTempDevices}
+                        />
+                    }
+                    content={renderActiveComponent()}
+                />
+            </div>
         </div>
     )
 }

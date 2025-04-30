@@ -1,6 +1,5 @@
 import React from 'react'
 import { Device } from '../App'
-import { TransmitterType } from '../services/api'
 import '../styles/Sidebar.css'
 
 // 前端設備類型（簡化版）
@@ -14,6 +13,9 @@ interface SidebarProps {
     onDeleteDevice: (id: number) => void
     onAddDevice: () => void
     onRefresh: () => void
+    onApply: () => void
+    onCancel: () => void
+    hasTempDevices: boolean
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -24,6 +26,9 @@ const Sidebar: React.FC<SidebarProps> = ({
     onDeleteDevice,
     onAddDevice,
     onRefresh,
+    onApply,
+    onCancel,
+    hasTempDevices,
 }) => {
     return (
         <div className="sidebar-container">
@@ -45,6 +50,26 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <span className="status-disconnected">未連接</span>
                 )}
             </div>
+
+            <div className="action-buttons">
+                <button
+                    onClick={onApply}
+                    disabled={
+                        loading || apiStatus !== 'connected' || !hasTempDevices
+                    }
+                    className="apply-button"
+                >
+                    套用
+                </button>
+                <button
+                    onClick={onCancel}
+                    disabled={loading}
+                    className="cancel-button"
+                >
+                    取消
+                </button>
+            </div>
+
             <div className="devices-list">
                 {[...devices].map((device) => (
                     <div key={device.id} className="device-item">
