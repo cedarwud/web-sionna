@@ -1,8 +1,15 @@
 // src/SceneView.tsx
-import { Suspense, useLayoutEffect, useMemo, useEffect, useState } from 'react'
+import {
+    Suspense,
+    useLayoutEffect,
+    useMemo,
+    useEffect,
+    useState,
+    useRef,
+} from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { ContactShadows } from '@react-three/drei'
-import { Bounds, OrbitControls, useGLTF } from '@react-three/drei'
+import { Bounds, OrbitControls, useGLTF, Clone } from '@react-three/drei'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 // @ts-ignore
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader'
@@ -12,6 +19,7 @@ import { Device } from '../App' // 從 App 引入前端 Device 介面
 
 // 修改: 直接使用靜態檔案路徑而非 API 端點，避免後端處理錯誤
 const SCENE_URL = '/static/models/XIN.glb'
+const UAV_MODEL_URL = '/api/v1/sionna/models/uav' // 新增 UAV 模型 URL
 
 // 定義設備類型材質和尺寸
 const TX_MATERIAL = new THREE.MeshStandardMaterial({
@@ -19,17 +27,20 @@ const TX_MATERIAL = new THREE.MeshStandardMaterial({
     emissive: 0x000066,
     emissiveIntensity: 0.5,
 })
-const RX_MATERIAL = new THREE.MeshStandardMaterial({
-    color: 0xff0000, // 紅色
-    emissive: 0x660000,
-    emissiveIntensity: 0.5,
-})
+// RX_MATERIAL 不再需要，因為我們會用 UAV 模型
+// const RX_MATERIAL = new THREE.MeshStandardMaterial({
+//     color: 0xff0000, // 紅色
+//     emissive: 0x660000,
+//     emissiveIntensity: 0.5,
+// })
 const INT_MATERIAL = new THREE.MeshStandardMaterial({
     color: 0x000000, // 黑色
     emissive: 0x000000,
     emissiveIntensity: 0.5,
 })
-const DEVICE_SIZE = 5
+const DEVICE_SIZE = 5 // TX 和 INT 的尺寸
+const UAV_SCALE = 1 // <-- 暫時放大 Scale 方便觀察
+const UAV_Y_OFFSET = 10 // <-- 稍微調整偏移
 
 // 定義射線材質 - 線寬度增加
 const RAY_MATERIAL = new THREE.LineBasicMaterial({
@@ -76,9 +87,23 @@ interface RayPathData {
 
 /* ---------------- 1) 讀 glTF → 加材質 / Normals ---------------- */
 function Etoile({ devices = [] }: EtoileProps) {
-    const { scene } = useGLTF(SCENE_URL) as GLTF
+    const { scene: mainScene } = useGLTF(SCENE_URL) as GLTF
+    const { scene: uavModelScene } = useGLTF(UAV_MODEL_URL) as GLTF
+
+    // --- 新增: 打印加載的 UAV 模型信息 ---
+    useEffect(() => {
+        if (uavModelScene) {
+            console.log('UAV Model Loaded:', uavModelScene)
+            // 可以進一步檢查模型的結構，例如 children
+            console.log('UAV Model Children:', uavModelScene.children)
+        } else {
+            console.log('UAV Model not loaded yet or failed.')
+        }
+    }, [uavModelScene])
+    // --- 結束新增 ---
+
     const { controls } = useThree()
-    const [rays, setRays] = useState<THREE.Object3D[]>([]) // 修改為Object3D以支援多種3D物件
+    const [rays, setRays] = useState<THREE.Object3D[]>([])
 
     // 將useLayoutEffect從useMemo中移出，放在組件頂層
     useLayoutEffect(() => {
@@ -87,7 +112,7 @@ function Etoile({ devices = [] }: EtoileProps) {
 
     /** 只在 glTF 載完後跑一次 → 回傳處理後的 clone */
     const prepared = useMemo(() => {
-        const root = scene.clone(true) // ❗ 不要直接改原始 glTF，clone 一份
+        const root = mainScene.clone(true) // ❗ 不要直接改原始 glTF，clone 一份
 
         // ─── 2.1 載入並設定地板貼圖 ────────────────────────────────
         const loader = new TextureLoader()
@@ -126,25 +151,51 @@ function Etoile({ devices = [] }: EtoileProps) {
         root.traverse((o: THREE.Object3D) => {
             if ((o as THREE.Mesh).isMesh) {
                 const m = o as THREE.Mesh
+                // 開啟所有物件的陰影投射與接收 (稍後再針對地面調整)
+                m.castShadow = true
+                m.receiveShadow = true
+
                 if (m.geometry && m.geometry.boundingBox) {
                     m.geometry.computeBoundingBox()
                     const bb = m.geometry.boundingBox
                     const size = new THREE.Vector3()
                     bb.getSize(size)
-                    const area = size.x * size.z
+                    const area = size.x * size.z // 使用 XZ 平面面積判斷地面
 
                     // 檢查是否為最大面積的 mesh
                     if (area > maxArea) {
-                        // 如果之前有 groundMesh，將其 receiveShadow/castShadow 重置
+                        // 如果之前有 groundMesh，將其 castShadow 設回 true
                         if (groundMesh) {
-                            groundMesh.receiveShadow = false
-                            groundMesh.castShadow = true // 非地面物件預設可投射陰影
+                            groundMesh.castShadow = true
                         }
 
                         maxArea = area
                         groundMesh = m // 更新 groundMesh
 
-                        // 直接在此處設置 groundMesh 的材質和陰影屬性
+                        // 地面材質設定 (與之前相同)
+                        const loader = new TextureLoader()
+                        const groundTex = loader.load('/textures/groundTex.png')
+                        const normalTex = loader.load('/textures/normalTex.png')
+                        const roughnessTex = loader.load(
+                            '/textures/roughnessTex.png'
+                        )
+                        const displacementTex = loader.load(
+                            '/textures/displacementTex.png'
+                        )
+                        const textures: THREE.Texture[] = [
+                            groundTex,
+                            normalTex,
+                            roughnessTex,
+                            displacementTex,
+                        ]
+                        groundTex.repeat.set(60, 60)
+                        roughnessTex.repeat.set(60, 60)
+                        textures.forEach((tex: THREE.Texture) => {
+                            tex.wrapS = RepeatWrapping
+                            tex.wrapT = RepeatWrapping
+                            tex.repeat.set(40, 40)
+                            tex.colorSpace = SRGBColorSpace
+                        })
                         groundMesh.material = new THREE.MeshStandardMaterial({
                             map: groundTex,
                             normalMap: normalTex,
@@ -162,28 +213,52 @@ function Etoile({ devices = [] }: EtoileProps) {
                         })
                         groundMesh.receiveShadow = true // 地板接收陰影
                         groundMesh.castShadow = false // 地板不投射陰影
-                    } else {
-                        // 非地面物件，設置預設的陰影屬性
-                        m.castShadow = true
-                        m.receiveShadow = false
                     }
+                    // else { // 非地面物件已在開頭設定 castShadow = true, receiveShadow = true
+                    //     m.castShadow = true
+                    //     m.receiveShadow = true // 讓建築物也能接收陰影
+                    // }
                 } else if (m.geometry) {
-                    // 如果沒有 boundingBox，嘗試計算
+                    // ... (計算 boundingBox 的備用邏輯，確保 cast/receiveShadow)
                     m.geometry.computeBoundingBox()
                     if (m.geometry.boundingBox) {
-                        // 計算後，重新執行面積檢查邏輯
                         const bb = m.geometry.boundingBox
                         const size = new THREE.Vector3()
                         bb.getSize(size)
                         const area = size.x * size.z
-
                         if (area > maxArea) {
                             if (groundMesh) {
-                                groundMesh.receiveShadow = false
                                 groundMesh.castShadow = true
                             }
                             maxArea = area
                             groundMesh = m
+                            const loader = new TextureLoader()
+                            const groundTex = loader.load(
+                                '/textures/groundTex.png'
+                            )
+                            const normalTex = loader.load(
+                                '/textures/normalTex.png'
+                            )
+                            const roughnessTex = loader.load(
+                                '/textures/roughnessTex.png'
+                            )
+                            const displacementTex = loader.load(
+                                '/textures/displacementTex.png'
+                            )
+                            const textures: THREE.Texture[] = [
+                                groundTex,
+                                normalTex,
+                                roughnessTex,
+                                displacementTex,
+                            ]
+                            groundTex.repeat.set(60, 60)
+                            roughnessTex.repeat.set(60, 60)
+                            textures.forEach((tex: THREE.Texture) => {
+                                tex.wrapS = RepeatWrapping
+                                tex.wrapT = RepeatWrapping
+                                tex.repeat.set(40, 40)
+                                tex.colorSpace = SRGBColorSpace
+                            })
                             groundMesh.material =
                                 new THREE.MeshStandardMaterial({
                                     map: groundTex,
@@ -204,12 +279,11 @@ function Etoile({ devices = [] }: EtoileProps) {
                             groundMesh.castShadow = false
                         } else {
                             m.castShadow = true
-                            m.receiveShadow = false
+                            m.receiveShadow = true
                         }
                     } else {
-                        // 無法計算 boundingBox，設置預設陰影
                         m.castShadow = true
-                        m.receiveShadow = false
+                        m.receiveShadow = true
                     }
                 } else {
                     // 沒有 geometry，跳過
@@ -222,7 +296,7 @@ function Etoile({ devices = [] }: EtoileProps) {
 
         // 移除 UV 相關代碼和警告，直接完成
         return root
-    }, [scene])
+    }, [mainScene])
 
     // 載入射線數據
     useEffect(() => {
@@ -373,34 +447,74 @@ function Etoile({ devices = [] }: EtoileProps) {
     // 渲染設備
     const deviceMeshes = useMemo(() => {
         return devices.map((device) => {
-            // 根據設備類型選擇材質
-            let material
-            if (device.name.startsWith('tx-')) {
-                material = TX_MATERIAL
-            } else if (device.name.startsWith('rx-')) {
-                material = RX_MATERIAL
-            } else if (device.name.startsWith('int-')) {
-                material = INT_MATERIAL
+            if (device.name.startsWith('rx-')) {
+                // --- 渲染 UAV 模型 ---
+                if (!uavModelScene) {
+                    console.log(
+                        `RX device ${device.id}: UAV model not ready, skipping.`
+                    )
+                    return null // 如果模型尚未加載，則不渲染
+                }
+                console.log(
+                    `RX device ${device.id}: Rendering UAV model. Position: ${[
+                        device.x,
+                        device.z + UAV_Y_OFFSET,
+                        device.y,
+                    ]}, Scale: ${UAV_SCALE}`
+                )
+                return (
+                    <primitive
+                        key={device.id}
+                        object={uavModelScene.clone(true)} // 克隆模型以供每個接收器使用
+                        position={[
+                            device.x,
+                            device.z + UAV_Y_OFFSET, // Y 軸是場景的 Z 軸，加上偏移量
+                            device.y, // Z 軸是場景的 Y 軸
+                        ]}
+                        scale={[UAV_SCALE, UAV_SCALE, UAV_SCALE]}
+                        // rotation={[0, Math.random() * Math.PI * 2, 0]} // <-- 暫時移除隨機旋轉
+                        // 暫時移除 onUpdate 以簡化調試
+                        // onUpdate={(self: THREE.Object3D) => self.traverse((child: THREE.Object3D) => {
+                        //     if ((child as THREE.Mesh).isMesh) {
+                        //         child.castShadow = true;
+                        //         child.receiveShadow = true;
+                        //     }
+                        // })}
+                    />
+                )
             } else {
-                material = TX_MATERIAL // 默認為發射器材質
-            }
+                // --- 渲染 TX 和 INT 球體 ---
+                let material
+                if (device.name.startsWith('tx-')) {
+                    material = TX_MATERIAL
+                } else if (device.name.startsWith('int-')) {
+                    material = INT_MATERIAL
+                } else {
+                    material = TX_MATERIAL // 默認為發射器材質
+                }
 
-            // 為了清晰顯示，設備位置Y軸上移5單位（避免埋在地形裡）
-            return (
-                <mesh
-                    key={device.id}
-                    position={[device.x, device.z + 5, device.y]}
-                    material={material}
-                >
-                    <sphereGeometry args={[DEVICE_SIZE, 16, 16]} />
-                </mesh>
-            )
+                return (
+                    <mesh
+                        key={device.id}
+                        position={[
+                            device.x,
+                            device.z + 5, // Y 軸是場景的 Z 軸，加上偏移量
+                            device.y, // Z 軸是場景的 Y 軸
+                        ]}
+                        material={material}
+                        castShadow
+                        receiveShadow
+                    >
+                        <sphereGeometry args={[DEVICE_SIZE, 16, 16]} />
+                    </mesh>
+                )
+            }
         })
-    }, [devices])
+    }, [devices, uavModelScene]) // 加入 uavModelScene 作為依賴
 
     return (
         <Bounds>
-            <primitive object={prepared} />
+            <primitive object={prepared} castShadow receiveShadow />
             {deviceMeshes}
             {/* {rays.map((ray, index) => (
                 <primitive key={`ray-${index}`} object={ray} />
@@ -424,45 +538,37 @@ export default function SceneView({ devices = [] }: SceneViewProps) {
                 camera={{ position: [0, 400, 0], near: 0.1, far: 1e4 }}
                 gl={{
                     toneMapping: THREE.ACESFilmicToneMapping,
-                    toneMappingExposure: 0.9,
+                    toneMappingExposure: 0.8, // <-- 降低曝光
                 }}
             >
                 <color attach="background" args={['#7f7f7f']} />
-                <hemisphereLight args={[0xffffff, 0x333333, 0.3]} />
-                <ambientLight intensity={0.05} />
+                {/* 降低光照強度 */}
+                <hemisphereLight args={[0xffffff, 0x444444, 0.5]} />{' '}
+                {/* 強度從 0.8 -> 0.5 */}
+                <ambientLight intensity={0.05} /> {/* 強度從 0.1 -> 0.05 */}
                 <directionalLight
                     castShadow
-                    position={[5, 10, 5]}
-                    intensity={3}
+                    position={[15, 30, 10]}
+                    intensity={1.5} // <-- 強度從 4 -> 1.5
                     shadow-mapSize-width={4096}
                     shadow-mapSize-height={4096}
                     shadow-camera-near={1}
-                    shadow-camera-far={3000}
-                    shadow-camera-top={1000}
-                    shadow-camera-bottom={-1000}
-                    shadow-camera-left={1000}
-                    shadow-camera-right={-1000}
-                    shadow-bias={-0.0002}
-                    shadow-radius={10}
+                    shadow-camera-far={1000}
+                    shadow-camera-top={500}
+                    shadow-camera-bottom={-500}
+                    shadow-camera-left={500}
+                    shadow-camera-right={-500}
+                    shadow-bias={-0.0004}
+                    shadow-radius={8}
                 />
-                <directionalLight
-                    castShadow
-                    position={[20, 5, 20]} // 低角度，從側面掃射
-                    intensity={0.8}
-                    shadow-mapSize-width={2048}
-                    shadow-mapSize-height={2048}
-                    shadow-bias={-0.0002}
-                />
-                <directionalLight position={[-5, -10, -5]} intensity={0.8} />
                 <Suspense fallback={null}>
                     <Etoile devices={devices} />
                     <ContactShadows
-                        position={[0, 0, 0]} // z=0 地面
-                        opacity={0.3} // 控制陰影深淺
-                        width={200} // 覆蓋面積／寬度
-                        height={200} // 覆蓋面積／深度
-                        blur={2} // 模糊半徑
-                        far={10} // 阻擋距離（算到物件底面）
+                        position={[0, 0.1, 0]} // 稍微抬高，避免 z-fighting
+                        opacity={0.4} // 增加一點不透明度
+                        scale={400} // 增加範圍以匹配可能更大的場景
+                        blur={1.5} // 減少模糊，使陰影更清晰
+                        far={50} // 增加距離
                     />
                 </Suspense>
                 <OrbitControls makeDefault />

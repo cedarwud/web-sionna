@@ -7,7 +7,8 @@ import logging
 import numpy as np
 
 # 導入必要的函數和變數
-from app.api.v1.endpoints.sionna import build_gltf, XIN_GLB_PATH, GLB_PATH
+# from app.api.v1.endpoints.sionna import build_gltf, XIN_GLB_PATH, GLB_PATH # <-- 舊導入
+from app.core.config import XIN_GLB_PATH, GLB_PATH  # <-- 新導入，從設定檔
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -73,7 +74,7 @@ async def check_glb_colors(file_path: str = Form(None), file: UploadFile = File(
             total_vertices += vcount
 
             vc = getattr(mesh.visual, "vertex_colors", None)
-            # 只把形状正确、长度匹配的当作“有顶点色”
+            # 只把形状正确、长度匹配的当作"有顶点色"
             if vc is not None and vc.shape[0] == vcount:
                 # 这里假设 RGBA 全部 >0 就算有色
                 nonzero = vc[:, :3].sum(axis=1) > 0
@@ -116,10 +117,14 @@ async def bake_glb_to_models(filename: str = Form("scene.baked.glb")):
     if XIN_GLB_PATH.exists() and XIN_GLB_PATH.stat().st_size > 0:
         src = XIN_GLB_PATH
     else:
-        # fallback: 若 scene.glb 不存在就生成
+        # fallback: 若 scene.glb 不存在就【報錯】
         if not GLB_PATH.exists() or GLB_PATH.stat().st_size == 0:
-            if not build_gltf():
-                raise HTTPException(500, "無法生成 scene.glb")
+            # 移除 build_gltf() 調用
+            # if not build_gltf():
+            #    raise HTTPException(500, "無法生成 scene.glb")
+            raise HTTPException(
+                500, f"必要的 fallback 文件不存在或為空: {GLB_PATH}"
+            )  # 直接報錯
         src = GLB_PATH
 
     # 2) 讀入並淺灰化頂點色
