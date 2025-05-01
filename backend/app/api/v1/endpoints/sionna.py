@@ -21,31 +21,22 @@ from app.services.sionna_simulation import (  # Import service functions
     generate_constellation_plot,
     get_active_devices_from_db_efficient,
     add_to_scene_safe,
+    generate_empty_scene_image,
 )
 from app.core.config import (  # Import constants
     SCENE_WITH_PATHS_IMAGE_PATH,
     CONSTELLATION_IMAGE_PATH,
+    STATIC_IMAGES_DIR,
+    GLB_PATH,
+    MODELS_DIR,
+    XIN_GLB_PATH,
 )
+
+# 新增: 導入 run_in_threadpool
+from fastapi.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# 新增：GLB 模型文件路徑
-STATIC_DIR = (
-    Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
-    / "static"
-)
-MODELS_DIR = STATIC_DIR / "models"
-XIN_GLB_PATH = MODELS_DIR / "XIN.glb"  # 優先使用的 GLB 檔案
-GLB_PATH = MODELS_DIR / "scene.glb"  # 備用 GLB 檔案
-
-# 確保目錄存在
-MODELS_DIR.mkdir(parents=True, exist_ok=True)
-logger.info(f"Models directory path: {MODELS_DIR}")
-
-
-# 新增：生成 GLB 模型的函數
-# gltf.py or glb.py 中的 build_gltf()
 
 
 def build_gltf() -> bool:
@@ -1267,3 +1258,51 @@ async def get_ray_paths(session: AsyncSession = Depends(get_session)):
     except Exception as e:
         logger.exception(f"計算射線路徑時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail=f"計算射線路徑時發生錯誤: {str(e)}")
+
+
+@router.post("/generate-scene-image", tags=["Sionna Scene Management"])
+async def trigger_generate_scene_image(
+    filename: str = Query(
+        "empty_scene.png",
+        description="儲存的圖片檔案名稱 (將存在於 static/images/)",
+    )
+):
+    """
+    觸發伺服器生成基於 GLB 的場景圖像並儲存。
+    """
+    logger.info(f"--- API Request: /generate-scene-image?filename={filename} ---")
+
+    # **安全性**: 基本的檔名驗證，防止路徑遍歷
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="無效的檔案名稱。")
+
+    # 構造完整的輸出路徑
+    # 確保 STATIC_IMAGES_DIR 是 Path 對象
+    if not isinstance(STATIC_IMAGES_DIR, Path):
+        logger.error(f"STATIC_IMAGES_DIR 設定錯誤，不是 Path 對象: {STATIC_IMAGES_DIR}")
+        raise HTTPException(
+            status_code=500, detail="伺服器配置錯誤: 圖像儲存路徑無效。"
+        )
+
+    output_file_path = STATIC_IMAGES_DIR / filename
+    output_path_str = str(output_file_path)
+
+    logger.info(f"請求將渲染圖像儲存至伺服器路徑: {output_path_str}")
+
+    try:
+        # 使用 run_in_threadpool 執行同步函數，避免阻塞
+        success = await run_in_threadpool(
+            generate_empty_scene_image, output_path=output_path_str
+        )
+        if success:
+            logger.info(f"圖像成功生成並儲存至: {output_path_str}")
+            return {
+                "message": "Scene image generated successfully.",
+                "path": output_path_str,  # 回傳相對於伺服器的路徑可能更有用，或是一個可訪問的 URL
+            }
+        else:
+            logger.error(f"伺服器端生成圖像失敗。目標路徑: {output_path_str}")
+            raise HTTPException(status_code=500, detail="伺服器端生成圖像失敗。")
+    except Exception as e:
+        logger.exception(f"呼叫 generate_empty_scene_image 時發生未預期錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"伺服器內部錯誤: {str(e)}")

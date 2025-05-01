@@ -5,7 +5,6 @@ Pillow
 sionna
 sionna-rt
 trimesh
-open3d
 pyrender
 python-multipart  # 支援表單數據和文件上傳
 

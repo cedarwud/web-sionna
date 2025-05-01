@@ -16,7 +16,8 @@ ENV PYTHONUNBUFFERED=1
 ENV TF_CPP_MIN_LOG_LEVEL="3"
 # 讓 Dr.Jit 能找到 LLVM shared lib
 ENV DRJIT_LIBLLVM_PATH=/usr/lib/x86_64-linux-gnu/libLLVM-14.so.1
-
+# 設定 PyOpenGL 使用 EGL
+ENV PYOPENGL_PLATFORM=egl
 
 # 4. 安裝系統依賴（LLVM 開發＋運行時庫）
 #    - 原有的 LLVM 相關
@@ -26,8 +27,7 @@ ENV DRJIT_LIBLLVM_PATH=/usr/lib/x86_64-linux-gnu/libLLVM-14.so.1
 RUN apt update && apt install -y --no-install-recommends \
     libgl1-mesa-glx \
     libegl1-mesa \
-    libosmesa6 \
-    libosmesa6-dev \
+    libopengl0 \
     llvm-dev \
     libllvm14 \
     build-essential \

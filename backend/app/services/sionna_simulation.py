@@ -23,10 +23,29 @@ from app.db.models import Device, Transmitter, Receiver, DeviceType, Transmitter
 from app.core.config import OUTPUT_DIR
 from app.crud import crud_device  # 導入整合後的 crud_device 模塊
 
+# 新增導入 for GLB rendering
+import trimesh
+import pyrender
+from PIL import Image
+import io
+
+# 從 config 導入 (假設已移動)
+from app.core.config import XIN_GLB_PATH
+
 logger = logging.getLogger(__name__)
 
 # Ensure output directory exists (could also be done on app startup)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# Note: OUTPUT_DIR is now defined in config.py as STATIC_IMAGES_DIR
+# The directory creation is also handled in config.py
+# os.makedirs(OUTPUT_DIR, exist_ok=True) # Can be removed if config.py handles it
+
+# # 新增：GLB 模型文件路徑 (REMOVED - Defined in config.py)
+# STATIC_DIR = (
+#     Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+#     / "static"
+# )
+# MODELS_DIR = STATIC_DIR / "models"
+# XIN_GLB_PATH = MODELS_DIR / "XIN.glb"  # 優先使用的 GLB 檔案
 
 
 # --- 定義新的資料容器 ---
@@ -552,45 +571,145 @@ async def generate_constellation_plot(
         return False
 
 
-# --- 新增：渲染空場景的函數 ---
+# TODO: Rename this function as it no longer generates an "empty" scene based on sionna.rt.scene
+# Suggestion: generate_scene_image_from_glb
 def generate_empty_scene_image(output_path: str):
-    """Generates a simple empty scene image."""
-    logger.info("Entering generate_empty_scene_image function...")
+    """Generates a scene image by rendering the GLB file specified by XIN_GLB_PATH."""
+    logger.info(
+        f"Entering generate_scene_image_from_glb (formerly generate_empty_scene_image) function, rendering from {XIN_GLB_PATH}..."
+    )
     try:
-        scene = load_scene(sionna.rt.scene.etoile)  # Load a base scene
-        my_cam = Camera(position=[0, 0, 1000], look_at=[0, 1, 0])  # Default camera
-
-        fig = plt.figure()
-        scene.render(
-            camera=my_cam, resolution=[800, 600], num_samples=64
-        )  # Lower samples for faster empty scene
-
-        # Ensure the directory exists before saving
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        try:
-            logger.info(f"Saving empty scene directly to: {output_path}")
-            plt.savefig(output_path, bbox_inches="tight", pad_inches=0, dpi=150)
-            plt.close(fig)
-
-            # 確認文件確實存在且不為空
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                logger.info(
-                    f"Successfully saved empty scene image to {output_path}, size: {os.path.getsize(output_path)} bytes"
-                )
-                return True
-            else:
-                logger.error(
-                    f"Failed to generate empty scene image or image is empty: {output_path}"
-                )
-                return False
-        except Exception as save_err:
-            logger.error(
-                f"Error saving empty scene image to {output_path}: {save_err}",
-                exc_info=True,
-            )
-            plt.close(fig)  # 確保關閉圖表
+        # 檢查 GLB 檔案是否存在
+        if not os.path.exists(XIN_GLB_PATH) or os.path.getsize(XIN_GLB_PATH) == 0:
+            logger.error(f"GLB file not found or empty: {XIN_GLB_PATH}")
             return False
+
+        # 1. 讀入場景 (使用 trimesh)
+        logger.info(f"Loading GLB file: {XIN_GLB_PATH}")
+        scene_tm = trimesh.load(XIN_GLB_PATH, force="scene")
+        logger.info("GLB file loaded successfully.")
+
+        # 2. 建立 pyrender.Scene，使用 Scene 環境光參數
+        pr_scene = pyrender.Scene(
+            bg_color=[0.4, 0.4, 0.4, 1.0],  # 背景深灰 (#666666)
+            ambient_light=[0.6, 0.6, 0.6],  # 使用 Scene 環境光模擬地面反彈和基礎亮度
+        )
+
+        # 3. 把每個子網格加入場景
+        logger.info("Adding geometry to pyrender scene...")
+        for name, geom in scene_tm.geometry.items():
+            # 確保法線存在
+            if geom.vertices is not None and len(geom.vertices) > 0:
+                if (
+                    not hasattr(geom, "vertex_normals")
+                    or geom.vertex_normals is None
+                    or len(geom.vertex_normals) != len(geom.vertices)
+                ):
+                    # Check if faces exist before computing normals
+                    if (
+                        hasattr(geom, "faces")
+                        and geom.faces is not None
+                        and len(geom.faces) > 0
+                    ):
+                        logger.warning(
+                            f"Mesh '{name}' missing normals, computing them."
+                        )
+                        geom.compute_vertex_normals()
+                    else:
+                        logger.warning(
+                            f"Mesh '{name}' has no faces, cannot compute normals. Skipping."
+                        )
+                        continue  # Skip this mesh if it has no faces
+
+                # 檢查是否有有效的視覺資訊
+                if not hasattr(geom, "visual") or (
+                    not hasattr(geom.visual, "vertex_colors")
+                    and not hasattr(geom.visual, "material")
+                ):
+                    logger.warning(
+                        f"Mesh '{name}' has no visual information (vertex colors or material). Applying default white color."
+                    )
+                    # Assign a default color if none exists
+                    geom.visual = trimesh.visual.ColorVisuals(
+                        mesh=geom, vertex_colors=[255, 255, 255, 255]
+                    )
+
+                try:
+                    mesh = pyrender.Mesh.from_trimesh(geom, smooth=False)
+                    pr_scene.add(mesh)
+                except Exception as mesh_err:
+                    logger.error(
+                        f"Failed to convert mesh '{name}' to pyrender mesh: {mesh_err}",
+                        exc_info=True,
+                    )
+                    # Optionally skip this problematic mesh
+                    # continue
+            else:
+                logger.warning(f"Skipping mesh '{name}' because it has no vertices.")
+        logger.info("Geometry added.")
+
+        # --- 4. 光照設定：移除 Hemisphere/Ambient 物件，只用一個主方向光 ---
+        # # 4a. 移除獨立的半球光和環境光物件
+        # pr_scene.add(pyrender.HemisphereLight(skyColor=[1.0, 1.0, 1.0], groundColor=[0.2, 0.2, 0.2], intensity=0.6), pose=np.eye(4))
+        # pr_scene.add(pyrender.AmbientLight(color=[1.0, 1.0, 1.0], intensity=0.1))
+
+        # 4b. 保留主方向光 (強度 3.0)
+        warm_white = np.array([1.0, 0.98, 0.9])
+        main_light = pyrender.DirectionalLight(color=warm_white, intensity=3.0)
+        # 使用預設 pose (從 Z+ 射向原點)
+        pr_scene.add(main_light, pose=np.eye(4))
+
+        # 5. 設置相機
+        camera = pyrender.PerspectiveCamera(yfov=np.pi / 4.0, znear=0.1, zfar=10000.0)
+        # 保持 Y=700 俯視
+        cam_pose = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0],  # Local X = World X
+                [0.0, 0.0, 1.0, 700.0],  # Local Y = World Z, Position Y=700
+                [0.0, -1.0, 0.0, 0.0],  # Local Z = World -Y (Look down)
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+
+        pr_scene.add(camera, pose=cam_pose)
+        logger.info("Lights and camera added.")
+
+        # 6. Offscreen render → PNG
+        logger.info("Starting offscreen rendering...")
+        render_width, render_height = (
+            1200,
+            800,
+        )  # Or use dimensions from original function if needed
+        renderer = pyrender.OffscreenRenderer(render_width, render_height)
+        color, _ = renderer.render(pr_scene)
+        renderer.delete()
+        logger.info("Rendering complete.")
+
+        # 7. 保存圖像 (使用 PIL)
+        # 確保目錄存在
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        logger.info(f"Saving rendered scene image to: {output_path}")
+        img = Image.fromarray(color)
+        img.save(output_path, format="PNG")
+
+        # 確認文件確實存在且不為空
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.info(
+                f"Successfully saved rendered scene image to {output_path}, size: {os.path.getsize(output_path)} bytes"
+            )
+            return True
+        else:
+            logger.error(
+                f"Failed to save rendered scene image or image is empty: {output_path}"
+            )
+            return False
+
+    except ImportError as ie:
+        logger.error(
+            f"Import error, make sure trimesh, pyrender, and Pillow are installed: {ie}",
+            exc_info=True,
+        )
+        return False
     except Exception as e:
-        logger.error(f"Error generating empty scene image: {e}", exc_info=True)
-        plt.close("all")
+        logger.error(f"Error rendering scene from GLB: {e}", exc_info=True)
         return False
