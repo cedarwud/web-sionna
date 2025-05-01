@@ -17,8 +17,8 @@ const CoordinateDisplay: React.FC<CoordinateDisplayProps> = React.memo(
         }
 
         // 計算場景座標
-        const sceneX = Math.round((position.x - 492) / 1.2)
-        const sceneY = Math.round((370 - position.y) / 1.2)
+        const sceneX = Math.round((position.x - 419) / 1.43)
+        const sceneY = Math.round((position.y - 382) / 1.43)
 
         return (
             <div

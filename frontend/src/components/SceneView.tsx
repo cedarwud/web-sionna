@@ -3,6 +3,7 @@ import { Suspense, useLayoutEffect, useMemo, useEffect, useState } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { ContactShadows } from '@react-three/drei'
 import { Bounds, OrbitControls, useGLTF } from '@react-three/drei'
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 // @ts-ignore
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader'
 import * as THREE from 'three'
@@ -56,6 +57,23 @@ interface EtoileProps {
     devices: Device[]
 }
 
+// 新增: 定義 API 回應數據類型
+interface Point {
+    x: number
+    y: number
+    z: number
+}
+
+interface RayPath {
+    points: Point[]
+    is_los?: boolean
+    width?: number
+}
+
+interface RayPathData {
+    paths: RayPath[]
+}
+
 /* ---------------- 1) 讀 glTF → 加材質 / Normals ---------------- */
 function Etoile({ devices = [] }: EtoileProps) {
     const { scene } = useGLTF(SCENE_URL) as GLTF
@@ -64,7 +82,7 @@ function Etoile({ devices = [] }: EtoileProps) {
 
     // 將useLayoutEffect從useMemo中移出，放在組件頂層
     useLayoutEffect(() => {
-        controls?.target?.set(0, 0, 0)
+        ;(controls as OrbitControlsImpl)?.target?.set(0, 0, 0)
     }, [controls])
 
     /** 只在 glTF 載完後跑一次 → 回傳處理後的 clone */
@@ -105,43 +123,102 @@ function Etoile({ devices = [] }: EtoileProps) {
         // 尋找最大面積（可能是地面）的網格
         let maxArea = 0
         let groundMesh: THREE.Mesh | null = null
-        root.traverse((o: any) => {
+        root.traverse((o: THREE.Object3D) => {
             if ((o as THREE.Mesh).isMesh) {
                 const m = o as THREE.Mesh
-                m.geometry.computeBoundingBox()
-                m.castShadow = true
-                m.receiveShadow = false
-                const bb = m.geometry.boundingBox!
-                const size = new THREE.Vector3()
-                bb.getSize(size)
-                const area = size.x * size.z
-                if (area > maxArea) {
-                    maxArea = area
-                    groundMesh = m
+                if (m.geometry && m.geometry.boundingBox) {
+                    m.geometry.computeBoundingBox()
+                    const bb = m.geometry.boundingBox
+                    const size = new THREE.Vector3()
+                    bb.getSize(size)
+                    const area = size.x * size.z
+
+                    // 檢查是否為最大面積的 mesh
+                    if (area > maxArea) {
+                        // 如果之前有 groundMesh，將其 receiveShadow/castShadow 重置
+                        if (groundMesh) {
+                            groundMesh.receiveShadow = false
+                            groundMesh.castShadow = true // 非地面物件預設可投射陰影
+                        }
+
+                        maxArea = area
+                        groundMesh = m // 更新 groundMesh
+
+                        // 直接在此處設置 groundMesh 的材質和陰影屬性
+                        groundMesh.material = new THREE.MeshStandardMaterial({
+                            map: groundTex,
+                            normalMap: normalTex,
+                            roughnessMap: roughnessTex,
+                            displacementMap: displacementTex,
+                            displacementScale: 5,
+                            displacementBias: -2,
+                            color: 0xffffff,
+                            roughness: 0.8,
+                            metalness: 0.1,
+                            emissive: 0x555555,
+                            emissiveIntensity: 0.4,
+                            vertexColors: false,
+                            normalScale: new THREE.Vector2(0.5, 0.5),
+                        })
+                        groundMesh.receiveShadow = true // 地板接收陰影
+                        groundMesh.castShadow = false // 地板不投射陰影
+                    } else {
+                        // 非地面物件，設置預設的陰影屬性
+                        m.castShadow = true
+                        m.receiveShadow = false
+                    }
+                } else if (m.geometry) {
+                    // 如果沒有 boundingBox，嘗試計算
+                    m.geometry.computeBoundingBox()
+                    if (m.geometry.boundingBox) {
+                        // 計算後，重新執行面積檢查邏輯
+                        const bb = m.geometry.boundingBox
+                        const size = new THREE.Vector3()
+                        bb.getSize(size)
+                        const area = size.x * size.z
+
+                        if (area > maxArea) {
+                            if (groundMesh) {
+                                groundMesh.receiveShadow = false
+                                groundMesh.castShadow = true
+                            }
+                            maxArea = area
+                            groundMesh = m
+                            groundMesh.material =
+                                new THREE.MeshStandardMaterial({
+                                    map: groundTex,
+                                    normalMap: normalTex,
+                                    roughnessMap: roughnessTex,
+                                    displacementMap: displacementTex,
+                                    displacementScale: 5,
+                                    displacementBias: -2,
+                                    color: 0xffffff,
+                                    roughness: 0.8,
+                                    metalness: 0.1,
+                                    emissive: 0x555555,
+                                    emissiveIntensity: 0.4,
+                                    vertexColors: false,
+                                    normalScale: new THREE.Vector2(0.5, 0.5),
+                                })
+                            groundMesh.receiveShadow = true
+                            groundMesh.castShadow = false
+                        } else {
+                            m.castShadow = true
+                            m.receiveShadow = false
+                        }
+                    } else {
+                        // 無法計算 boundingBox，設置預設陰影
+                        m.castShadow = true
+                        m.receiveShadow = false
+                    }
+                } else {
+                    // 沒有 geometry，跳過
                 }
             }
         })
 
-        // 2.2 覆寫地板為「貼圖 + 白色底」材質 - 移除 aoMap 相關設定
-        if (groundMesh) {
-            groundMesh.material = new THREE.MeshStandardMaterial({
-                map: groundTex,
-                normalMap: normalTex,
-                roughnessMap: roughnessTex,
-                displacementMap: displacementTex,
-                displacementScale: 5,
-                displacementBias: -2, // ← 讓整體往下移避免浮在空中
-                color: 0xffffff,
-                roughness: 0.8, // 增加粗糙度以補償缺少的 aoMap
-                metalness: 0.1,
-                emissive: 0x555555,
-                emissiveIntensity: 0.4, // 稍微增加自發光強度以補償缺少的 aoMap
-                vertexColors: false,
-                normalScale: new THREE.Vector2(0.5, 0.5),
-            })
-            groundMesh.receiveShadow = true // ← 地板接收陰影
-            groundMesh.castShadow = false // ← 地板本身不投影到自己
-        }
+        // 2.2 部分的邏輯已移至 traverse 內部，移除此區塊
+        // if (groundMesh) { ... }
 
         // 移除 UV 相關代碼和警告，直接完成
         return root
@@ -166,7 +243,7 @@ function Etoile({ devices = [] }: EtoileProps) {
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`)
                 }
-                const data = await response.json()
+                const data = (await response.json()) as RayPathData
                 console.log('獲取到射線路徑數據:', data)
 
                 // 創建射線物件
@@ -175,7 +252,7 @@ function Etoile({ devices = [] }: EtoileProps) {
                 if (data && Array.isArray(data.paths)) {
                     console.log(`將創建 ${data.paths.length} 條射線路徑`)
 
-                    data.paths.forEach((path, index) => {
+                    data.paths.forEach((path: RayPath, index: number) => {
                         if (
                             path.points &&
                             Array.isArray(path.points) &&
@@ -194,7 +271,7 @@ function Etoile({ devices = [] }: EtoileProps) {
 
                             // 從後端獲取的點座標
                             const points = path.points.map(
-                                (point) =>
+                                (point: Point) =>
                                     new THREE.Vector3(point.x, point.z, point.y)
                             )
 
@@ -290,7 +367,7 @@ function Etoile({ devices = [] }: EtoileProps) {
             }
         }
 
-        fetchRayData()
+        // fetchRayData() // <--- 暫時禁用射線獲取
     }, [devices])
 
     // 渲染設備
@@ -325,9 +402,9 @@ function Etoile({ devices = [] }: EtoileProps) {
         <Bounds>
             <primitive object={prepared} />
             {deviceMeshes}
-            {rays.map((ray, index) => (
+            {/* {rays.map((ray, index) => (
                 <primitive key={`ray-${index}`} object={ray} />
-            ))}
+            ))} */}
         </Bounds>
     )
 }
@@ -351,11 +428,7 @@ export default function SceneView({ devices = [] }: SceneViewProps) {
                 }}
             >
                 <color attach="background" args={['#7f7f7f']} />
-                <hemisphereLight
-                    skyColor={0xffffff}
-                    groundColor={0x333333}
-                    intensity={0.3}
-                />
+                <hemisphereLight args={[0xffffff, 0x333333, 0.3]} />
                 <ambientLight intensity={0.05} />
                 <directionalLight
                     castShadow
