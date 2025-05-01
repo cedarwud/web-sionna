@@ -420,7 +420,6 @@ const ConstellationViewer: React.FC = () => {
                         }}
                     />
                 )}
-                {isLoading && !imageUrl && <p>正在載入星座圖...</p>}
             </div>
         </div>
     )
