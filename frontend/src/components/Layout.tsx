@@ -1,20 +1,26 @@
-import { useState, ReactNode } from 'react'
+import { useState, ReactNode, useEffect } from 'react'
 import '../styles/Layout.css'
 
 interface LayoutProps {
     children?: ReactNode
     sidebar: ReactNode
     content?: ReactNode
-    defaultCollapsed?: boolean
+    activeComponent: string
 }
 
 const Layout: React.FC<LayoutProps> = ({
     children,
     sidebar,
     content,
-    defaultCollapsed = true,
+    activeComponent,
 }) => {
-    const [collapsed, setCollapsed] = useState<boolean>(defaultCollapsed)
+    const [collapsed, setCollapsed] = useState<boolean>(
+        activeComponent !== '2DRT'
+    )
+
+    useEffect(() => {
+        setCollapsed(activeComponent !== '2DRT')
+    }, [activeComponent])
 
     const toggleSidebar = () => {
         setCollapsed(!collapsed)

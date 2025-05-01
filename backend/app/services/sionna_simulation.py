@@ -29,10 +29,14 @@ import pyrender
 from PIL import Image
 import io
 
-# 從 config 導入 (假設已移動)
-from app.core.config import XIN_GLB_PATH
+# 從 config 導入
+from app.core.config import XIN_GLB_PATH, OUTPUT_DIR  # 確保導入 XIN_GLB_PATH
 
 logger = logging.getLogger(__name__)
+
+# --- 新增：場景背景顏色常數 ---
+SCENE_BACKGROUND_COLOR_RGB = [0.5, 0.5, 0.5]
+# --- End Constant ---
 
 # Ensure output directory exists (could also be done on app startup)
 # Note: OUTPUT_DIR is now defined in config.py as STATIC_IMAGES_DIR
@@ -137,130 +141,302 @@ async def get_active_devices_from_db_efficient(
     return transmitters_data, receivers_data
 
 
+# --- Helper Function for Pyrender Scene Setup ---
+def _setup_pyrender_scene_from_glb() -> Optional[pyrender.Scene]:
+    """Loads GLB, sets up pyrender scene, lights, camera. Returns Scene or None on error."""
+    logger.info(f"Setting up base pyrender scene from GLB: {XIN_GLB_PATH}")
+    try:
+        # 1. Load GLB
+        if not os.path.exists(XIN_GLB_PATH) or os.path.getsize(XIN_GLB_PATH) == 0:
+            logger.error(f"GLB file not found or empty: {XIN_GLB_PATH}")
+            return None
+        scene_tm = trimesh.load(XIN_GLB_PATH, force="scene")
+        logger.info("GLB file loaded.")
+
+        # 2. Create pyrender scene with background and ambient light
+        pr_scene = pyrender.Scene(
+            bg_color=[*SCENE_BACKGROUND_COLOR_RGB, 1.0],
+            ambient_light=[0.6, 0.6, 0.6],
+        )
+
+        # 3. Add GLB geometry
+        logger.info("Adding GLB geometry...")
+        for name, geom in scene_tm.geometry.items():
+            if geom.vertices is not None and len(geom.vertices) > 0:
+                if (
+                    not hasattr(geom, "vertex_normals")
+                    or geom.vertex_normals is None
+                    or len(geom.vertex_normals) != len(geom.vertices)
+                ):
+                    if (
+                        hasattr(geom, "faces")
+                        and geom.faces is not None
+                        and len(geom.faces) > 0
+                    ):
+                        try:
+                            geom.compute_vertex_normals()
+                        except Exception as norm_err:
+                            logger.error(
+                                f"Failed compute normals for '{name}': {norm_err}",
+                                exc_info=True,
+                            )
+                            continue
+                    else:
+                        logger.warning(f"Mesh '{name}' has no faces. Skipping.")
+                        continue
+                if not hasattr(geom, "visual") or (
+                    not hasattr(geom.visual, "vertex_colors")
+                    and not hasattr(geom.visual, "material")
+                ):
+                    geom.visual = trimesh.visual.ColorVisuals(
+                        mesh=geom, vertex_colors=[255, 255, 255, 255]
+                    )
+                try:
+                    mesh = pyrender.Mesh.from_trimesh(geom, smooth=False)
+                    pr_scene.add(mesh)
+                except Exception as mesh_err:
+                    logger.error(
+                        f"Failed convert mesh '{name}': {mesh_err}", exc_info=True
+                    )
+            else:
+                logger.warning(f"Skipping empty mesh '{name}'.")
+        logger.info("GLB geometry added.")
+
+        # 4. Add lights
+        warm_white = np.array([1.0, 0.98, 0.9])
+        main_light = pyrender.DirectionalLight(color=warm_white, intensity=3.0)
+        pr_scene.add(main_light, pose=np.eye(4))
+        logger.info("Lights added.")
+
+        # 5. Add camera
+        camera = pyrender.PerspectiveCamera(yfov=np.pi / 4.0, znear=0.1, zfar=10000.0)
+        cam_pose = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 700.0],
+                [0.0, -1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+        pr_scene.add(camera, pose=cam_pose)
+        logger.info("Camera added.")
+
+        return pr_scene
+
+    except Exception as e:
+        logger.error(f"Error setting up pyrender scene from GLB: {e}", exc_info=True)
+        return None
+
+
+# --- NEW Helper Function for Rendering, Cropping, and Saving ---
+def _render_crop_and_save(
+    pr_scene: pyrender.Scene,
+    output_path: str,
+    bg_color_float: List[float] = SCENE_BACKGROUND_COLOR_RGB,
+    render_width: int = 1200,
+    render_height: int = 800,
+    padding_y: int = 20,  # Default vertical padding
+    padding_x: int = 20,  # Default horizontal padding
+) -> bool:
+    """Renders the scene, crops based on content, and saves the image."""
+    logger.info("Starting offscreen rendering...")
+    try:
+        renderer = pyrender.OffscreenRenderer(render_width, render_height)
+        color, _ = renderer.render(pr_scene)
+        renderer.delete()
+        logger.info("Rendering complete.")
+    except Exception as render_err:
+        logger.error(f"Pyrender OffscreenRenderer failed: {render_err}", exc_info=True)
+        return False
+
+    # --- Cropping Logic ---
+    logger.info("Calculating bounding box for cropping...")
+    image_to_save = color  # Default to original image
+    try:
+        bg_color_uint8 = (np.array(bg_color_float) * 255).astype(np.uint8)
+        mask = ~np.all(color[:, :, :3] == bg_color_uint8, axis=2)
+        rows, cols = np.where(mask)
+
+        if rows.size > 0 and cols.size > 0:
+            ymin, ymax = rows.min(), rows.max()
+            xmin, xmax = cols.min(), cols.max()
+            # Apply padding separately
+            ymin = max(0, ymin - padding_y)
+            xmin = max(0, xmin - padding_x)
+            ymax = min(render_height - 1, ymax + padding_y)
+            xmax = min(render_width - 1, xmax + padding_x)
+
+            if xmin < xmax and ymin < ymax:
+                cropped_color = color[ymin : ymax + 1, xmin : xmax + 1]
+                logger.info(
+                    f"Cropping image to bounds: (xmin={xmin}, ymin={ymin}, xmax={xmax}, ymax={ymax})"
+                )
+                image_to_save = cropped_color
+            else:
+                logger.warning(f"Invalid crop bounds (min>=max). Saving original.")
+        else:
+            logger.warning("No non-background pixels found. Saving original image.")
+
+    except Exception as crop_err:
+        logger.error(f"Error during image cropping: {crop_err}", exc_info=True)
+        # Fallback to original image
+
+    # --- Save the Image using PIL ---
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    logger.info(f"Saving final image to: {output_path}")
+    try:
+        img = Image.fromarray(image_to_save)
+        img.save(output_path, format="PNG")
+    except Exception as save_err:
+        logger.error(f"Failed to save rendered image: {save_err}", exc_info=True)
+        return False
+
+    # Final check
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        logger.info(
+            f"Successfully saved image to {output_path}, size: {os.path.getsize(output_path)} bytes"
+        )
+        return True
+    else:
+        logger.error(f"Failed to save image or image is empty: {output_path}")
+        return False
+
+
 async def generate_scene_with_paths_image(
     output_path: str, session: AsyncSession
 ) -> bool:
-    logger.info("Entering generate_scene_with_paths_image function...")
+    logger.info("Entering generate_scene_with_paths_image (using helpers) function...")
     try:
+        # --- 1. Fetch Device Data --- (Keep)
         transmitters_data, receivers_data = await get_active_devices_from_db_efficient(
             session
         )
-        # 修改：檢查是否有有效的發射器和接收器數據列表
         if not transmitters_data or not receivers_data:
-            logger.error("No active transmitters or receivers found in the database.")
             return False
-        # 不再只取第一個 rx_data = receivers_data[0]
 
-        scene = load_scene(sionna.rt.scene.etoile)
+        # --- 2. Sionna RT Path Calculation --- (Keep)
+        logger.info("Setting up Sionna RT scene for path calculation...")
+        scene_rt = load_scene(sionna.rt.scene.etoile)
         iso = PlanarArray(num_rows=1, num_cols=1, pattern="iso", polarization="V")
-        scene.tx_array = iso
-        scene.rx_array = iso
+        scene_rt.tx_array = iso
+        scene_rt.rx_array = iso
 
-        sionna_txs = []
+        sionna_txs_rt = []  # Keep track of Sionna RT objects
         for tx_data in transmitters_data:
             if tx_data.position_list:
-                color_param = {}
-                if tx_data.transmitter_type == TransmitterType.INTERFERER:
-                    color_param = {"color": [0, 0, 0]}
-                    logger.info(
-                        f"Setting interferer {tx_data.device_model.name} color to black for scene rendering."
-                    )
                 sionna_tx = SionnaTransmitter(
                     tx_data.device_model.name,
                     position=tx_data.position_list,
-                    **color_param,
                 )
-                sionna_txs.append(sionna_tx)
-                add_to_scene_safe(scene, sionna_tx)
-            else:
-                logger.warning(
-                    f"Skipping transmitter '{tx_data.device_model.name}' due to invalid position."
-                )
+                sionna_txs_rt.append(sionna_tx)
+                add_to_scene_safe(scene_rt, sionna_tx)
 
-        # 修改：遍歷所有接收器數據並添加到場景
-        sionna_rxs = []  # 存儲創建的 SionnaReceiver 對象
+        sionna_rxs_rt = []
         valid_rx_positions_exist = False
         for rx_data in receivers_data:
             if rx_data.position_list:
                 sionna_rx = SionnaReceiver(
                     rx_data.device_model.name, position=rx_data.position_list
                 )
-                sionna_rxs.append(sionna_rx)
-                add_to_scene_safe(scene, sionna_rx)
+                sionna_rxs_rt.append(sionna_rx)
+                add_to_scene_safe(scene_rt, sionna_rx)
                 valid_rx_positions_exist = True
-            else:
-                logger.warning(
-                    f"Skipping receiver '{rx_data.device_model.name}' due to invalid position."
-                )
 
-        # 如果處理完所有接收器後，沒有一個有有效位置，則退出
         if not valid_rx_positions_exist:
-            logger.error("No receivers with valid positions found.")
+            logger.error("No receivers with valid positions for path calculation.")
+            return False
+        if not scene_rt.transmitters or not scene_rt.receivers:
+            logger.error("No valid TX/RX added to Sionna RT scene.")
             return False
 
-        # 修改 look_at 邏輯：讓所有發射器指向第一個有效的接收器 (如果存在)
-        # 或者可以完全移除 look_at，solver 會處理所有配對
-        if sionna_rxs:  # 確保至少有一個有效的接收器被添加到場景
-            first_sionna_rx = sionna_rxs[0]
-            for stx in sionna_txs:
-                try:
-                    stx.look_at(first_sionna_rx)
-                except Exception as look_at_err:
-                    logger.warning(
-                        f"Error setting look_at for TX {stx.name}: {look_at_err}"
-                    )
-
-        # 修改：檢查場景中是否有有效的發射器和 *至少一個* 接收器
-        if not scene.transmitters or not scene.receivers:
-            logger.error(
-                "No valid transmitters or no valid receivers were added to the Sionna scene."
-            )
-            plt.close("all")
-            return False
-
+        logger.info("Calculating paths using Sionna RT solver...")
         solver = PathSolver()
-        # solver 會自動計算場景中所有 TX-RX 對的路徑
         paths = solver(
-            scene,
+            scene_rt,
             max_depth=6,
             los=True,
             specular_reflection=True,
             diffuse_reflection=False,
             refraction=True,
         )
+        logger.info("Path calculation complete.")
 
-        my_cam = Camera(position=[0, 0, 1000], look_at=[0, 1, 0])
-        fig = plt.figure()
-        # render 會顯示場景中所有的發射器、接收器和計算出的路徑
-        scene.render(camera=my_cam, paths=paths, resolution=[800, 600], num_samples=128)
-
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        try:
-            logger.info(f"Saving scene with paths directly to: {output_path}")
-            plt.savefig(output_path, bbox_inches="tight", pad_inches=0, dpi=150)
-            plt.close(fig)
-
-            # 確認文件確實存在且不為空
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                logger.info(
-                    f"Successfully saved scene image to {output_path}, size: {os.path.getsize(output_path)} bytes"
-                )
-                return True
-            else:
-                logger.error(
-                    f"Failed to generate scene image or image is empty: {output_path}"
-                )
-                return False
-        except Exception as save_err:
-            logger.error(
-                f"Error saving scene image to {output_path}: {save_err}", exc_info=True
-            )
-            plt.close(fig)  # 確保關閉圖表
+        # --- 3. Setup Base Pyrender Scene using Helper ---
+        pr_scene = _setup_pyrender_scene_from_glb()  # Helper uses this bg color
+        if pr_scene is None:
             return False
+        logger.info("Base pyrender scene setup complete.")
 
+        # --- 4. Overlay Devices --- (Keep)
+        logger.info("Overlaying devices onto pyrender scene...")
+        DEVICE_SIZE = 5.0
+        TX_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[0.0, 0.0, 1.0, 1.0]
+        )
+        RX_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[1.0, 0.0, 0.0, 1.0]
+        )
+        INT_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[0.0, 0.0, 0.0, 1.0]
+        )
+        # Add device spheres to pr_scene...
+        for tx_data in transmitters_data:
+            if tx_data.position_list:
+                pos = tx_data.position_list
+                render_pos = [pos[0], pos[2] + DEVICE_SIZE, pos[1]]
+                mat = (
+                    INT_MATERIAL_PYRENDER
+                    if tx_data.transmitter_type == TransmitterType.INTERFERER
+                    else TX_MATERIAL_PYRENDER
+                )
+                try:
+                    sphere = trimesh.primitives.Sphere(radius=DEVICE_SIZE)
+                    device_mesh = pyrender.Mesh.from_trimesh(sphere, material=mat)
+                    pose_matrix = np.eye(4)
+                    pose_matrix[:3, 3] = render_pos
+                    pr_scene.add(device_mesh, pose=pose_matrix)
+                except Exception as dev_err:
+                    logger.error(
+                        f"Failed adding TX '{tx_data.device_model.name}': {dev_err}",
+                        exc_info=True,
+                    )
+        for rx_data in receivers_data:
+            if rx_data.position_list:
+                pos = rx_data.position_list
+                render_pos = [pos[0], pos[2] + DEVICE_SIZE, pos[1]]
+                mat = RX_MATERIAL_PYRENDER
+                try:
+                    sphere = trimesh.primitives.Sphere(radius=DEVICE_SIZE)
+                    device_mesh = pyrender.Mesh.from_trimesh(sphere, material=mat)
+                    pose_matrix = np.eye(4)
+                    pose_matrix[:3, 3] = render_pos
+                    pr_scene.add(device_mesh, pose=pose_matrix)
+                except Exception as dev_err:
+                    logger.error(
+                        f"Failed adding RX '{rx_data.device_model.name}': {dev_err}",
+                        exc_info=True,
+                    )
+        logger.info("Devices overlay complete.")
+
+        # --- 5. Overlay Ray Paths --- (Keep placeholder)
+        logger.warning("Ray path overlay in pyrender is not yet implemented.")
+        # TODO: Implement path overlay
+
+        # --- 6. Render, Crop, and Save using Helper ---
+        success = _render_crop_and_save(
+            pr_scene,
+            output_path,
+            bg_color_float=SCENE_BACKGROUND_COLOR_RGB,
+            padding_x=5,  # Set horizontal padding to 5
+            padding_y=20,  # Keep vertical padding at 20 (or adjust if needed)
+        )
+        return success
+
+    except ImportError as ie:
+        logger.error(f"Import error: {ie}", exc_info=True)
+        return False
     except Exception as e:
         logger.error(f"Error in generate_scene_with_paths_image: {e}", exc_info=True)
-        plt.close("all")
         return False
 
 
@@ -571,145 +747,29 @@ async def generate_constellation_plot(
         return False
 
 
-# TODO: Rename this function as it no longer generates an "empty" scene based on sionna.rt.scene
-# Suggestion: generate_scene_image_from_glb
+# --- Refactor generate_empty_scene_image to use the helpers ---
 def generate_empty_scene_image(output_path: str):
-    """Generates a scene image by rendering the GLB file specified by XIN_GLB_PATH."""
-    logger.info(
-        f"Entering generate_scene_image_from_glb (formerly generate_empty_scene_image) function, rendering from {XIN_GLB_PATH}..."
-    )
+    """Generates a cropped scene image by rendering the GLB file (using helpers)."""
+    logger.info(f"Entering generate_empty_scene_image function, calling helpers...")
     try:
-        # 檢查 GLB 檔案是否存在
-        if not os.path.exists(XIN_GLB_PATH) or os.path.getsize(XIN_GLB_PATH) == 0:
-            logger.error(f"GLB file not found or empty: {XIN_GLB_PATH}")
+        # 1. Setup scene using helper
+        pr_scene = _setup_pyrender_scene_from_glb()  # Helper uses this bg color
+        if pr_scene is None:
             return False
 
-        # 1. 讀入場景 (使用 trimesh)
-        logger.info(f"Loading GLB file: {XIN_GLB_PATH}")
-        scene_tm = trimesh.load(XIN_GLB_PATH, force="scene")
-        logger.info("GLB file loaded successfully.")
-
-        # 2. 建立 pyrender.Scene，使用 Scene 環境光參數
-        pr_scene = pyrender.Scene(
-            bg_color=[0.4, 0.4, 0.4, 1.0],  # 背景深灰 (#666666)
-            ambient_light=[0.6, 0.6, 0.6],  # 使用 Scene 環境光模擬地面反彈和基礎亮度
+        # 2. Render, Crop, and Save using helper
+        success = _render_crop_and_save(
+            pr_scene,
+            output_path,
+            bg_color_float=SCENE_BACKGROUND_COLOR_RGB,
+            padding_x=5,  # Set horizontal padding to 5
+            padding_y=20,  # Keep vertical padding at 20 (or adjust if needed)
         )
-
-        # 3. 把每個子網格加入場景
-        logger.info("Adding geometry to pyrender scene...")
-        for name, geom in scene_tm.geometry.items():
-            # 確保法線存在
-            if geom.vertices is not None and len(geom.vertices) > 0:
-                if (
-                    not hasattr(geom, "vertex_normals")
-                    or geom.vertex_normals is None
-                    or len(geom.vertex_normals) != len(geom.vertices)
-                ):
-                    # Check if faces exist before computing normals
-                    if (
-                        hasattr(geom, "faces")
-                        and geom.faces is not None
-                        and len(geom.faces) > 0
-                    ):
-                        logger.warning(
-                            f"Mesh '{name}' missing normals, computing them."
-                        )
-                        geom.compute_vertex_normals()
-                    else:
-                        logger.warning(
-                            f"Mesh '{name}' has no faces, cannot compute normals. Skipping."
-                        )
-                        continue  # Skip this mesh if it has no faces
-
-                # 檢查是否有有效的視覺資訊
-                if not hasattr(geom, "visual") or (
-                    not hasattr(geom.visual, "vertex_colors")
-                    and not hasattr(geom.visual, "material")
-                ):
-                    logger.warning(
-                        f"Mesh '{name}' has no visual information (vertex colors or material). Applying default white color."
-                    )
-                    # Assign a default color if none exists
-                    geom.visual = trimesh.visual.ColorVisuals(
-                        mesh=geom, vertex_colors=[255, 255, 255, 255]
-                    )
-
-                try:
-                    mesh = pyrender.Mesh.from_trimesh(geom, smooth=False)
-                    pr_scene.add(mesh)
-                except Exception as mesh_err:
-                    logger.error(
-                        f"Failed to convert mesh '{name}' to pyrender mesh: {mesh_err}",
-                        exc_info=True,
-                    )
-                    # Optionally skip this problematic mesh
-                    # continue
-            else:
-                logger.warning(f"Skipping mesh '{name}' because it has no vertices.")
-        logger.info("Geometry added.")
-
-        # --- 4. 光照設定：移除 Hemisphere/Ambient 物件，只用一個主方向光 ---
-        # # 4a. 移除獨立的半球光和環境光物件
-        # pr_scene.add(pyrender.HemisphereLight(skyColor=[1.0, 1.0, 1.0], groundColor=[0.2, 0.2, 0.2], intensity=0.6), pose=np.eye(4))
-        # pr_scene.add(pyrender.AmbientLight(color=[1.0, 1.0, 1.0], intensity=0.1))
-
-        # 4b. 保留主方向光 (強度 3.0)
-        warm_white = np.array([1.0, 0.98, 0.9])
-        main_light = pyrender.DirectionalLight(color=warm_white, intensity=3.0)
-        # 使用預設 pose (從 Z+ 射向原點)
-        pr_scene.add(main_light, pose=np.eye(4))
-
-        # 5. 設置相機
-        camera = pyrender.PerspectiveCamera(yfov=np.pi / 4.0, znear=0.1, zfar=10000.0)
-        # 保持 Y=700 俯視
-        cam_pose = np.array(
-            [
-                [1.0, 0.0, 0.0, 0.0],  # Local X = World X
-                [0.0, 0.0, 1.0, 700.0],  # Local Y = World Z, Position Y=700
-                [0.0, -1.0, 0.0, 0.0],  # Local Z = World -Y (Look down)
-                [0.0, 0.0, 0.0, 1.0],
-            ]
-        )
-
-        pr_scene.add(camera, pose=cam_pose)
-        logger.info("Lights and camera added.")
-
-        # 6. Offscreen render → PNG
-        logger.info("Starting offscreen rendering...")
-        render_width, render_height = (
-            1200,
-            800,
-        )  # Or use dimensions from original function if needed
-        renderer = pyrender.OffscreenRenderer(render_width, render_height)
-        color, _ = renderer.render(pr_scene)
-        renderer.delete()
-        logger.info("Rendering complete.")
-
-        # 7. 保存圖像 (使用 PIL)
-        # 確保目錄存在
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        logger.info(f"Saving rendered scene image to: {output_path}")
-        img = Image.fromarray(color)
-        img.save(output_path, format="PNG")
-
-        # 確認文件確實存在且不為空
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            logger.info(
-                f"Successfully saved rendered scene image to {output_path}, size: {os.path.getsize(output_path)} bytes"
-            )
-            return True
-        else:
-            logger.error(
-                f"Failed to save rendered scene image or image is empty: {output_path}"
-            )
-            return False
+        return success
 
     except ImportError as ie:
-        logger.error(
-            f"Import error, make sure trimesh, pyrender, and Pillow are installed: {ie}",
-            exc_info=True,
-        )
+        logger.error(f"Import error in generate_empty_scene_image: {ie}", exc_info=True)
         return False
     except Exception as e:
-        logger.error(f"Error rendering scene from GLB: {e}", exc_info=True)
+        logger.error(f"Error rendering empty scene via helpers: {e}", exc_info=True)
         return False

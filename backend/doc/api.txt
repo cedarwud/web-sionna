@@ -1,6 +1,7 @@
 curl -X GET http://localhost:8000/api/v1/sionna/scene-image-rt -o /dev/null
 curl -X GET http://localhost:8000/api/v1/sionna/constellation-diagram -o /dev/null
 
-curl -X POST "http://localhost:8000/api/v1/sionna/generate-scene-image" -H "accept: application/json"
+curl -X POST "http://localhost:8000/api/v1/sionna/generate-scene-image?filename=empty_scene_pyrender.png" -H "accept: application/json"
+curl -X GET "http://localhost:8000/api/v1/sionna/scene-image-rt" -o scene_with_devices_pyrender.png
 
 docker compose build --no-cache && docker image prune -f

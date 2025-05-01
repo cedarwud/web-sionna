@@ -813,8 +813,30 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         // 使用固定標題
         const title = '場景與路徑 (Etoile)'
 
+        const [maxImageHeight, setMaxImageHeight] = useState<string>('auto') // 新增狀態儲存最大高度
+
+        // Effect to calculate and update max image height
+        useEffect(() => {
+            const calculateHeight = () => {
+                const navbarHeight = 60 // Navbar height in pixels
+                const availableHeight = window.innerHeight - navbarHeight
+                setMaxImageHeight(`${availableHeight}px`)
+            }
+
+            calculateHeight() // Initial calculation
+            window.addEventListener('resize', calculateHeight) // Update on resize
+
+            // Cleanup listener on component unmount
+            return () => window.removeEventListener('resize', calculateHeight)
+        }, []) // Empty dependency array means this runs once on mount and cleans up on unmount
+
         return (
-            <div style={{ position: 'relative' }}>
+            <div
+                style={{
+                    position: 'relative',
+                    backgroundColor: 'rgb(127, 127, 127)',
+                }}
+            >
                 {isLoading && <p>正在載入路徑圖...</p>}
                 {/* 只有在 imageUrl 存在且 loading 完成後才顯示 img，或在 loading 時顯示佔位符 */}
                 <div style={{ position: 'relative' }}>
@@ -831,10 +853,11 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                             onClick={handleImageClick}
                             style={{
                                 maxWidth: '100%',
-                                height: 'auto',
-                                border: '1px solid #ccc',
+                                maxHeight: maxImageHeight, // 使用計算後的最大高度
                                 display: isLoading ? 'none' : 'block',
                                 cursor: cursorStyle,
+                                objectFit: 'contain',
+                                margin: '0 auto', // 水平置中
                             }}
                         />
                     )}

@@ -631,6 +631,7 @@ function App() {
                         />
                     }
                     content={renderActiveComponent()}
+                    activeComponent={activeComponent}
                 />
             </div>
         </div>
