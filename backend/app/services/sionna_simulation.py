@@ -212,7 +212,7 @@ def _setup_pyrender_scene_from_glb() -> Optional[pyrender.Scene]:
         camera = pyrender.PerspectiveCamera(yfov=np.pi / 4.0, znear=0.1, zfar=10000.0)
         cam_pose = np.array(
             [
-                [1.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, -25.0],
                 [0.0, 0.0, 1.0, 700.0],
                 [0.0, -1.0, 0.0, 0.0],
                 [0.0, 0.0, 0.0, 1.0],
@@ -233,10 +233,10 @@ def _render_crop_and_save(
     pr_scene: pyrender.Scene,
     output_path: str,
     bg_color_float: List[float] = SCENE_BACKGROUND_COLOR_RGB,
-    render_width: int = 1200,
+    render_width: int = 800,
     render_height: int = 800,
-    padding_y: int = 20,  # Default vertical padding
-    padding_x: int = 20,  # Default horizontal padding
+    padding_y: int = 0,  # Default vertical padding
+    padding_x: int = 0,  # Default horizontal padding
 ) -> bool:
     """Renders the scene, crops based on content, and saves the image."""
     logger.info("Starting offscreen rendering...")
@@ -427,7 +427,7 @@ async def generate_scene_with_paths_image(
             pr_scene,
             output_path,
             bg_color_float=SCENE_BACKGROUND_COLOR_RGB,
-            padding_x=5,  # Set horizontal padding to 5
+            padding_x=0,  # Set horizontal padding to 0
             padding_y=20,  # Keep vertical padding at 20 (or adjust if needed)
         )
         return success
