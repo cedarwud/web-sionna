@@ -611,9 +611,34 @@ function StaticModel({
     scale: [number, number, number]
 }) {
     const { scene } = useGLTF(url) as GLTF
+
+    // 創建一個深度克隆的新實例，避免共享同一個模型實例
+    const clonedScene = useMemo(() => {
+        // 深度克隆場景，確保每個設備有自己獨立的模型實例
+        const clone = scene.clone(true)
+
+        // 確保所有材質也被複製，避免材質共享
+        clone.traverse((node: THREE.Object3D) => {
+            if ((node as THREE.Mesh).isMesh) {
+                const mesh = node as THREE.Mesh
+                if (mesh.material) {
+                    // 如果是材質數組
+                    if (Array.isArray(mesh.material)) {
+                        mesh.material = mesh.material.map((mat) => mat.clone())
+                    } else {
+                        // 單個材質
+                        mesh.material = mesh.material.clone()
+                    }
+                }
+            }
+        })
+
+        return clone
+    }, [scene])
+
     return (
         <primitive
-            object={scene}
+            object={clonedScene}
             position={position}
             scale={scale}
             onUpdate={(self: THREE.Object3D) =>
