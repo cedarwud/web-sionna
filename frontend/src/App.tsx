@@ -561,18 +561,8 @@ function App() {
             )
         })
 
-        // Mark changes if a persistent device (id > 0) was modified
-        if (id > 0) {
-            const originalDevice = originalDevices.find((dev) => dev.id === id)
-            const currentDevice = tempDevices.find((d) => d.id === id)
-            // Check against original state or if the value actually changed compared to current temp state
-            if (
-                originalDevice &&
-                JSON.stringify(currentDevice) !== JSON.stringify(originalDevice)
-            ) {
-                setHasTempDevices(true)
-            }
-        }
+        // 標記為有變更，只要任何設備有變化（無論是新增的還是現有的）
+        setHasTempDevices(true)
     }
 
     // 處理導航菜單點擊
