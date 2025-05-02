@@ -38,6 +38,13 @@ interface NewDevice {
 // 定義靜態路徑指向後端存儲的最後一次成功渲染的圖像
 const FALLBACK_IMAGE_PATH = '/rendered_images/scene_with_paths.png'
 
+// 添加座標轉換常量 - 統一管理座標轉換參數
+const COORDINATE_TRANSFORM = {
+    offsetX: 419, // X轴偏移量
+    offsetY: 382, // Y轴偏移量
+    scale: 1.4, // 比例因子
+}
+
 // 使用 React.memo 包裝組件以避免不必要的重新渲染
 const SceneViewer: React.FC<SceneViewerProps> = React.memo(
     ({ devices: propDevices, refreshDeviceData }) => {
@@ -102,6 +109,8 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
             y: number
             clientX: number
             clientY: number
+            sceneX?: number
+            sceneY?: number
         } | null>(null) // 專門用於傳遞給 CoordinateDisplay 的狀態
 
         const imageRef = useRef<HTMLImageElement>(null)
@@ -133,6 +142,25 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         )
         const [cursorStyle, setCursorStyle] = useState<string>('crosshair')
 
+        // 輔助函數：將圖像座標轉換為場景座標
+        const imageToSceneCoords = useCallback(
+            (imageX: number, imageY: number): { x: number; y: number } => {
+                // 修改Y軸方向，使向下為正
+                // sceneX = (imageX - offsetX) / scale
+                // sceneY = (imageY - offsetY) / scale  <-- 修改這行，移除負號
+                const x = Math.round(
+                    (imageX - COORDINATE_TRANSFORM.offsetX) /
+                        COORDINATE_TRANSFORM.scale
+                )
+                const y = Math.round(
+                    (imageY - COORDINATE_TRANSFORM.offsetY) /
+                        COORDINATE_TRANSFORM.scale
+                )
+                return { x, y }
+            },
+            []
+        )
+
         // 輔助函數：將場景座標轉換為圖像座標
         const sceneToImageCoords = useCallback(
             (
@@ -140,11 +168,17 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                 sceneY: number
             ): { x: number; y: number } | null => {
                 if (!imageRef.current) return null
-                // 這些是從 handleImageClick 反向計算得到的
-                // sceneX = (x - 492) / 1.2  => x = sceneX * 1.2 + 492
-                // sceneY = (370 - y) / 1.2  => y = 370 - sceneY * 1.2
-                const x = Math.round(sceneX * 1.2 + 492)
-                const y = Math.round(370 - sceneY * 1.2)
+                // 修改Y軸方向，使向下為正
+                // x = sceneX * scale + offsetX
+                // y = sceneY * scale + offsetY  <-- 修改這行，移除減法
+                const x = Math.round(
+                    sceneX * COORDINATE_TRANSFORM.scale +
+                        COORDINATE_TRANSFORM.offsetX
+                )
+                const y = Math.round(
+                    sceneY * COORDINATE_TRANSFORM.scale +
+                        COORDINATE_TRANSFORM.offsetY
+                )
                 return { x, y }
             },
             []
@@ -442,12 +476,17 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                     const mouseX = Math.round(e.clientX - rect.left)
                     const mouseY = Math.round(e.clientY - rect.top)
 
+                    // 計算場景座標
+                    const sceneCoords = imageToSceneCoords(mouseX, mouseY)
+
                     // 更新顯示座標
                     const newDisplayPosition = {
                         x: mouseX,
                         y: mouseY,
                         clientX: e.clientX,
                         clientY: e.clientY,
+                        sceneX: sceneCoords.x,
+                        sceneY: sceneCoords.y,
                     }
                     updateMousePositionForDisplay(newDisplayPosition)
 
@@ -479,7 +518,12 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                     )
                 }
             },
-            [propDevices, updateMousePositionForDisplay, sceneToImageCoords]
+            [
+                propDevices,
+                updateMousePositionForDisplay,
+                sceneToImageCoords,
+                imageToSceneCoords,
+            ]
         )
 
         // 處理滑鼠離開事件
@@ -505,6 +549,9 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                     const rect = imageRef.current.getBoundingClientRect()
                     const clickX = Math.round(e.clientX - rect.left)
                     const clickY = Math.round(e.clientY - rect.top)
+
+                    // 使用統一函數計算場景座標
+                    const sceneCoords = imageToSceneCoords(clickX, clickY)
 
                     // 檢查是否點擊在懸停的設備上
                     if (hoveredDeviceId !== null) {
@@ -562,17 +609,13 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                         setIsEditing(false)
                         setEditingDeviceId(null)
 
-                        // 計算場景座標
-                        const sceneX = Math.round((clickX - 492) / 1.2)
-                        const sceneY = Math.round((370 - clickY) / 1.2)
-
                         setPopoverPosition({
                             x: clickX,
                             y: clickY,
                             clientX: e.clientX,
                             clientY: e.clientY,
-                            sceneX,
-                            sceneY,
+                            sceneX: sceneCoords.x,
+                            sceneY: sceneCoords.y,
                         })
 
                         // 生成名稱並設置初始 popover 數據
@@ -580,8 +623,8 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                             z: popoverDevice.z,
                             active: popoverDevice.active,
                             type: popoverDevice.type,
-                            x: sceneX,
-                            y: sceneY,
+                            x: sceneCoords.x,
+                            y: sceneCoords.y,
                             name: generateDeviceName(
                                 popoverDevice.type,
                                 propDevices
@@ -601,6 +644,7 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                 popoverDevice.active,
                 popoverDevice.type,
                 sceneToImageCoords,
+                imageToSceneCoords,
             ]
         )
 

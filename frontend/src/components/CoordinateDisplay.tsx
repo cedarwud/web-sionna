@@ -6,6 +6,8 @@ interface CoordinateDisplayProps {
         y: number
         clientX: number
         clientY: number
+        sceneX?: number
+        sceneY?: number
     } | null
 }
 
@@ -16,9 +18,9 @@ const CoordinateDisplay: React.FC<CoordinateDisplayProps> = React.memo(
             return null
         }
 
-        // 計算場景座標
-        const sceneX = Math.round((position.x - 437) / 1.45)
-        const sceneY = Math.round((position.y - 401) / 1.45)
+        // 如果已經有計算好的場景座標，則直接使用
+        const sceneX = position.sceneX !== undefined ? position.sceneX : null
+        const sceneY = position.sceneY !== undefined ? position.sceneY : null
 
         return (
             <div
