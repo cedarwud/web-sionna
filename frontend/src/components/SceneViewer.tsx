@@ -40,9 +40,9 @@ const FALLBACK_IMAGE_PATH = '/rendered_images/scene_with_paths.png'
 
 // 添加座標轉換常量 - 統一管理座標轉換參數
 const COORDINATE_TRANSFORM = {
-    offsetX: 419, // X轴偏移量
-    offsetY: 382, // Y轴偏移量
-    scale: 1.4, // 比例因子
+    offsetX: 436, // X轴偏移量
+    offsetY: 398, // Y轴偏移量
+    scale: 1.45, // 比例因子
 }
 
 // 使用 React.memo 包裝組件以避免不必要的重新渲染
@@ -102,6 +102,10 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         const [usingFallback, setUsingFallback] = useState<boolean>(false)
         const [retryCount, setRetryCount] = useState<number>(0)
         const [manualRetryMode, setManualRetryMode] = useState<boolean>(false)
+        const [imageNaturalSize, setImageNaturalSize] = useState<{
+            width: number
+            height: number
+        } | null>(null)
 
         // 新增滑鼠座標狀態 - 移除 mousePositionRef
         const [mousePositionForDisplay, setMousePositionForDisplay] = useState<{
@@ -144,21 +148,61 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
 
         // 輔助函數：將圖像座標轉換為場景座標
         const imageToSceneCoords = useCallback(
-            (imageX: number, imageY: number): { x: number; y: number } => {
-                // 修改Y軸方向，使向下為正
-                // sceneX = (imageX - offsetX) / scale
-                // sceneY = (imageY - offsetY) / scale  <-- 修改這行，移除負號
-                const x = Math.round(
-                    (imageX - COORDINATE_TRANSFORM.offsetX) /
+            (
+                mouseX: number, // Mouse X relative to img element
+                mouseY: number, // Mouse Y relative to img element
+                renderedWidth: number,
+                renderedHeight: number,
+                naturalWidth: number,
+                naturalHeight: number
+            ): { x: number; y: number } | null => {
+                if (naturalWidth === 0 || naturalHeight === 0) return null // Avoid division by zero
+
+                // Calculate the scale factor applied by 'object-fit: contain'
+                const ratioX = renderedWidth / naturalWidth
+                const ratioY = renderedHeight / naturalHeight
+                const actualScale = Math.min(ratioX, ratioY)
+
+                // Calculate the dimensions of the image as displayed within the element
+                const displayedImageWidth = naturalWidth * actualScale
+                const displayedImageHeight = naturalHeight * actualScale
+
+                // Calculate the offset of the displayed image within the element (due to centering)
+                const offsetX_render = (renderedWidth - displayedImageWidth) / 2
+                const offsetY_render =
+                    (renderedHeight - displayedImageHeight) / 2
+
+                // Adjust mouse coordinates to be relative to the actual displayed image area
+                const mouseXinDisplayed = mouseX - offsetX_render
+                const mouseYinDisplayed = mouseY - offsetY_render
+
+                // Check if the mouse is outside the actual image area
+                if (
+                    mouseXinDisplayed < 0 ||
+                    mouseXinDisplayed > displayedImageWidth ||
+                    mouseYinDisplayed < 0 ||
+                    mouseYinDisplayed > displayedImageHeight
+                ) {
+                    return null // Mouse is not over the actual image content
+                }
+
+                // Convert coordinates relative to the displayed image to coordinates relative to the original image
+                const originalImageX = mouseXinDisplayed / actualScale
+                const originalImageY = mouseYinDisplayed / actualScale
+
+                // Apply the fixed transformation from original image coordinates to scene coordinates
+                const sceneX = Math.round(
+                    (originalImageX - COORDINATE_TRANSFORM.offsetX) /
                         COORDINATE_TRANSFORM.scale
                 )
-                const y = Math.round(
-                    (imageY - COORDINATE_TRANSFORM.offsetY) /
+                const sceneY = Math.round(
+                    (originalImageY - COORDINATE_TRANSFORM.offsetY) /
                         COORDINATE_TRANSFORM.scale
-                )
-                return { x, y }
+                ) // Maintain original calculation
+
+                return { x: sceneX, y: sceneY }
             },
-            []
+            [] // COORDINATE_TRANSFORM is constant
         )
 
         // 輔助函數：將場景座標轉換為圖像座標
@@ -167,21 +211,48 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                 sceneX: number,
                 sceneY: number
             ): { x: number; y: number } | null => {
-                if (!imageRef.current) return null
-                // 修改Y軸方向，使向下為正
-                // x = sceneX * scale + offsetX
-                // y = sceneY * scale + offsetY  <-- 修改這行，移除減法
-                const x = Math.round(
+                if (!imageRef.current || !imageNaturalSize) return null // Check for natural size
+
+                const { width: naturalWidth, height: naturalHeight } =
+                    imageNaturalSize
+                const renderedWidth = imageRef.current.offsetWidth
+                const renderedHeight = imageRef.current.offsetHeight
+
+                if (naturalWidth === 0 || naturalHeight === 0) return null
+
+                // Inverse transformation: Scene -> Original Image Coords
+                const originalImageX =
                     sceneX * COORDINATE_TRANSFORM.scale +
-                        COORDINATE_TRANSFORM.offsetX
-                )
-                const y = Math.round(
+                    COORDINATE_TRANSFORM.offsetX
+                const originalImageY =
                     sceneY * COORDINATE_TRANSFORM.scale +
-                        COORDINATE_TRANSFORM.offsetY
+                    COORDINATE_TRANSFORM.offsetY
+
+                // Calculate the scale factor and offsets used for rendering ('object-fit: contain')
+                const ratioX = renderedWidth / naturalWidth
+                const ratioY = renderedHeight / naturalHeight
+                const actualScale = Math.min(ratioX, ratioY)
+                const displayedImageWidth = naturalWidth * actualScale
+                const displayedImageHeight = naturalHeight * actualScale
+                const offsetX_render = (renderedWidth - displayedImageWidth) / 2
+                const offsetY_render =
+                    (renderedHeight - displayedImageHeight) / 2
+
+                // Convert original image coords to coordinates relative to the *displayed* image area
+                const mouseXinDisplayed = originalImageX * actualScale
+                const mouseYinDisplayed = originalImageY * actualScale
+
+                // Convert coordinates relative to the displayed image area to coordinates relative to the *img element*
+                const imageElementX = Math.round(
+                    mouseXinDisplayed + offsetX_render
                 )
-                return { x, y }
+                const imageElementY = Math.round(
+                    mouseYinDisplayed + offsetY_render
+                )
+
+                return { x: imageElementX, y: imageElementY }
             },
-            []
+            [imageNaturalSize] // Add imageNaturalSize as dependency
         )
 
         // 獲取現有設備列表的函數 - 現在直接使用 props
@@ -417,6 +488,16 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
 
         const handleImageLoad = useCallback(() => {
             console.log(`Image element loaded successfully: ${imageUrl}`)
+            if (imageRef.current) {
+                // <-- Get natural dimensions on load
+                setImageNaturalSize({
+                    width: imageRef.current.naturalWidth,
+                    height: imageRef.current.naturalHeight,
+                })
+                console.log(
+                    `Natural image size: ${imageRef.current.naturalWidth}x${imageRef.current.naturalHeight}`
+                )
+            }
             setIsLoading(false) // 圖片成功顯示後，確認 loading 結束
             if (!usingFallback) {
                 setError(null) // 只有非備用圖像時才清除錯誤
@@ -471,58 +552,84 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
 
         const handleMouseMove = useCallback(
             (e: React.MouseEvent<HTMLImageElement>) => {
-                if (imageRef.current) {
+                if (imageRef.current && imageNaturalSize) {
+                    // Ensure natural size is available
                     const rect = imageRef.current.getBoundingClientRect()
-                    const mouseX = Math.round(e.clientX - rect.left)
-                    const mouseY = Math.round(e.clientY - rect.top)
+                    const mouseX = Math.round(e.clientX - rect.left) // Relative to element
+                    const mouseY = Math.round(e.clientY - rect.top) // Relative to element
 
-                    // 計算場景座標
-                    const sceneCoords = imageToSceneCoords(mouseX, mouseY)
+                    // Calculate scene coordinates using the new logic
+                    const sceneCoords = imageToSceneCoords(
+                        mouseX,
+                        mouseY,
+                        rect.width, // Rendered width
+                        rect.height, // Rendered height
+                        imageNaturalSize.width, // Natural width
+                        imageNaturalSize.height // Natural height
+                    )
 
-                    // 更新顯示座標
-                    const newDisplayPosition = {
-                        x: mouseX,
-                        y: mouseY,
-                        clientX: e.clientX,
-                        clientY: e.clientY,
-                        sceneX: sceneCoords.x,
-                        sceneY: sceneCoords.y,
-                    }
+                    // Update display coordinates (only if sceneCoords is not null)
+                    const newDisplayPosition = sceneCoords
+                        ? {
+                              x: mouseX, // Keep element-relative coords for potential debugging
+                              y: mouseY,
+                              clientX: e.clientX,
+                              clientY: e.clientY,
+                              sceneX: sceneCoords.x, // Use the calculated scene coords
+                              sceneY: sceneCoords.y,
+                          }
+                        : null // Don't show coordinates if mouse is outside image content
                     updateMousePositionForDisplay(newDisplayPosition)
 
-                    // 檢查是否有設備在懸停範圍內
+                    // --- Hover check ---
+                    // Use updated sceneToImageCoords for checking device proximity
                     let foundHoveredDeviceId: number | null = null
-                    for (const device of propDevices) {
-                        const deviceImageCoords = sceneToImageCoords(
-                            device.x,
-                            device.y
-                        )
-                        if (deviceImageCoords) {
-                            const distanceX = Math.abs(
-                                mouseX - deviceImageCoords.x
+                    if (sceneCoords) {
+                        // Only check hover if mouse is over image content
+                        for (const device of propDevices) {
+                            const deviceImageCoords = sceneToImageCoords(
+                                device.x,
+                                device.y
                             )
-                            const distanceY = Math.abs(
-                                mouseY - deviceImageCoords.y
-                            )
-                            if (distanceX <= 5 && distanceY <= 5) {
-                                foundHoveredDeviceId = device.id
-                                break // 找到第一個就停止
+                            if (deviceImageCoords) {
+                                // Check distance in screen pixels relative to the element
+                                const distanceX = Math.abs(
+                                    mouseX - deviceImageCoords.x
+                                )
+                                const distanceY = Math.abs(
+                                    mouseY - deviceImageCoords.y
+                                )
+                                // Keep the tolerance in screen pixels for now
+                                if (distanceX <= 5 && distanceY <= 5) {
+                                    foundHoveredDeviceId = device.id
+                                    break // Found the first one
+                                }
                             }
                         }
                     }
 
-                    // 更新懸停狀態和游標樣式
+                    // Update hover state and cursor style
                     setHoveredDeviceId(foundHoveredDeviceId)
                     setCursorStyle(
-                        foundHoveredDeviceId !== null ? 'pointer' : 'crosshair'
-                    )
+                        foundHoveredDeviceId !== null
+                            ? 'pointer'
+                            : sceneCoords
+                            ? 'crosshair'
+                            : 'default'
+                    ) // Change cursor based on image content hover
+                } else {
+                    // If imageRef or natural size isn't ready, clear display position and hover state
+                    updateMousePositionForDisplay(null)
+                    setHoveredDeviceId(null)
+                    setCursorStyle('default') // Use default cursor if not over image or image not ready
                 }
             },
             [
                 propDevices,
                 updateMousePositionForDisplay,
-                sceneToImageCoords,
-                imageToSceneCoords,
+                sceneToImageCoords, // Now depends on imageNaturalSize
+                imageToSceneCoords, // New dependency
+                imageNaturalSize, // New dependency
             ]
         )
 
@@ -530,30 +637,50 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         const handleMouseLeave = useCallback(() => {
             updateMousePositionForDisplay(null)
             setHoveredDeviceId(null)
-            setCursorStyle('crosshair')
+            setCursorStyle('crosshair') // Reset to default crosshair when leaving element
         }, [updateMousePositionForDisplay])
+
+        // 關閉彈出視窗 - 移到 handleImageClick 和 handleMouseMove 之前，因為它們可能依賴它
+        const handleClosePopover = useCallback(() => {
+            setShowPopover(false)
+            setPopoverPosition(null)
+            setIsEditing(false)
+            setEditingDeviceId(null)
+        }, [])
 
         // 處理圖片點擊事件 - 修改以處理編輯和新增
         const handleImageClick = useCallback(
             async (e: React.MouseEvent<HTMLImageElement>) => {
-                if (imageRef.current) {
+                if (imageRef.current && imageNaturalSize) {
+                    // Ensure natural size available
                     // 如果點擊時 popover 已開啟，則關閉
                     if (showPopover) {
-                        setShowPopover(false)
-                        setPopoverPosition(null)
-                        setIsEditing(false)
-                        setEditingDeviceId(null)
+                        handleClosePopover() // Use the dedicated close handler
                         return
                     }
 
                     const rect = imageRef.current.getBoundingClientRect()
-                    const clickX = Math.round(e.clientX - rect.left)
-                    const clickY = Math.round(e.clientY - rect.top)
+                    const clickX = Math.round(e.clientX - rect.left) // Relative to element
+                    const clickY = Math.round(e.clientY - rect.top) // Relative to element
 
-                    // 使用統一函數計算場景座標
-                    const sceneCoords = imageToSceneCoords(clickX, clickY)
+                    // Calculate scene coordinates using the new logic
+                    const sceneCoords = imageToSceneCoords(
+                        clickX,
+                        clickY,
+                        rect.width,
+                        rect.height,
+                        imageNaturalSize.width,
+                        imageNaturalSize.height
+                    )
 
-                    // 檢查是否點擊在懸停的設備上
+                    // Only proceed if the click was inside the actual image content
+                    if (!sceneCoords) {
+                        // Click was outside the image content (in the letterboxed area)
+                        // Do nothing or optionally close popover if desired
+                        return
+                    }
+
+                    // 檢查是否點擊在懸停的設備上 (hoveredDeviceId is reliable now)
                     if (hoveredDeviceId !== null) {
                         // --- 編輯模式 ---
                         setIsEditing(true)
@@ -568,24 +695,26 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                 convertBackendToNewDevice(deviceToEdit)
                             setPopoverDevice(initialPopoverData)
 
-                            // 設置 popover 位置靠近設備圖標
+                            // 設置 popover 位置靠近設備圖標 - use updated sceneToImageCoords
                             const deviceCoords = sceneToImageCoords(
                                 deviceToEdit.x,
                                 deviceToEdit.y
                             )
-                            const popoverX = deviceCoords
+
+                            // Position relative to client, potentially adjusted by device image coords
+                            const popoverClientX = deviceCoords
                                 ? rect.left + deviceCoords.x
                                 : e.clientX
-                            const popoverY = deviceCoords
+                            const popoverClientY = deviceCoords
                                 ? rect.top + deviceCoords.y
                                 : e.clientY
 
                             setPopoverPosition({
-                                x: clickX,
+                                x: clickX, // Store element-relative click coords
                                 y: clickY,
-                                clientX: popoverX,
-                                clientY: popoverY,
-                                sceneX: deviceToEdit.x,
+                                clientX: popoverClientX, // Use client coords for positioning
+                                clientY: popoverClientY + 10, // Offset below cursor/device
+                                sceneX: deviceToEdit.x, // Store actual scene coords
                                 sceneY: deviceToEdit.y,
                             })
                             setShowPopover(true)
@@ -609,22 +738,23 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                         setIsEditing(false)
                         setEditingDeviceId(null)
 
+                        // Position popover based on click location
                         setPopoverPosition({
                             x: clickX,
                             y: clickY,
-                            clientX: e.clientX,
-                            clientY: e.clientY,
-                            sceneX: sceneCoords.x,
+                            clientX: e.clientX, // Use direct click client coords
+                            clientY: e.clientY + 10, // Offset below cursor
+                            sceneX: sceneCoords.x, // Use calculated scene coords
                             sceneY: sceneCoords.y,
                         })
 
-                        // 生成名稱並設置初始 popover 數據
+                        // 生成名稱並設置初始 popover 數據 using calculated sceneCoords
                         const initialDevice = {
                             z: popoverDevice.z,
                             active: popoverDevice.active,
                             type: popoverDevice.type,
-                            x: sceneCoords.x,
-                            y: sceneCoords.y,
+                            x: sceneCoords.x, // Use correct scene coords
+                            y: sceneCoords.y, // Use correct scene coords
                             name: generateDeviceName(
                                 popoverDevice.type,
                                 propDevices
@@ -636,25 +766,21 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                 }
             },
             [
-                showPopover,
-                hoveredDeviceId,
-                propDevices,
-                generateDeviceName,
-                popoverDevice.z,
-                popoverDevice.active,
-                popoverDevice.type,
-                sceneToImageCoords,
-                imageToSceneCoords,
+                showPopover, // Existing
+                hoveredDeviceId, // Existing
+                propDevices, // Existing
+                generateDeviceName, // Existing
+                popoverDevice.z, // Existing (for default values)
+                popoverDevice.active, // Existing (for default values)
+                popoverDevice.type, // Existing (for default values)
+                sceneToImageCoords, // Updated
+                imageToSceneCoords, // Updated
+                imageNaturalSize, // New
+                handleClosePopover, // Existing
+                convertBackendToNewDevice, // Existing
+                getDeviceById, // Added missing dependency
             ]
         )
-
-        // 關閉彈出視窗
-        const handleClosePopover = useCallback(() => {
-            setShowPopover(false)
-            setPopoverPosition(null)
-            setIsEditing(false)
-            setEditingDeviceId(null)
-        }, [])
 
         // 處理 Popover 內設備屬性變更
         const handleDeviceChange = useCallback(

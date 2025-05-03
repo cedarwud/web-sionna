@@ -111,7 +111,7 @@ function App() {
         'disconnected' | 'connected' | 'error'
     >('disconnected')
     const [hasTempDevices, setHasTempDevices] = useState<boolean>(false)
-    const [activeComponent, setActiveComponent] = useState<string>('3DRT')
+    const [activeComponent, setActiveComponent] = useState<string>('2DRT')
 
     // 從API獲取設備數據
     const fetchDevices = useCallback(async () => {
