@@ -154,7 +154,9 @@
 }
 
 .device-name-input {
-  width: calc(100% - 30px);
+  font-size: 1.0rem;
+  text-align: center;
+  width: calc(100% - 80px);
   padding: 5px;
   background-color: var(--dark-input-bg);
   border: 1px solid var(--dark-border);
@@ -182,6 +184,42 @@
 
 .add-device-btn:hover {
   filter: brightness(90%);
+}
+
+/* 表格樣式 - 從 App.css 整合 */
+.device-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed; /* 確保欄位寬度固定 */
+}
+
+.device-table th,
+.device-table td {
+  overflow: hidden;
+  width: 25%; /* 將所有欄位設定為等寬 */
+  text-align: center; /* 讓內容居中 */
+  padding: 2px;
+  vertical-align: middle;
+}
+
+.device-table th {
+  color: var(--dark-text-secondary);
+  font-size: 0.9rem;
+  font-weight: normal;
+  padding-bottom: 5px;
+}
+
+.device-table input[type="number"],
+.device-table input[type="text"],
+.device-table select {
+  width: 100%;
+  padding: 4px;
+  background-color: var(--dark-input-bg);
+  border: 1px solid var(--dark-border);
+  border-radius: 3px;
+  color: var(--dark-text);
+  box-sizing: border-box;
+  text-align: right;
 }
 
 /* 錯誤訊息 */

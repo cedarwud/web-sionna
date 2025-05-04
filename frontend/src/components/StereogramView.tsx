@@ -739,17 +739,17 @@ function Etoile({ devices = [] }: EtoileProps) {
         return root
     }, [mainScene])
 
-    useEffect(() => {
-        // 射線數據加載邏輯保持不變（這裡省略具體實現）
-    }, [devices])
-
     const deviceMeshes = useMemo(() => {
         return devices.map((device) => {
             if (device.role === 'receiver') {
                 return (
                     <AnimatedUAV
                         key={device.id}
-                        position={[device.x, device.z + UAV_Y_OFFSET, device.y]}
+                        position={[
+                            device.position_x,
+                            device.position_z + UAV_Y_OFFSET,
+                            device.position_y,
+                        ]}
                         scale={[UAV_SCALE, UAV_SCALE, UAV_SCALE]}
                     />
                 )
@@ -758,7 +758,11 @@ function Etoile({ devices = [] }: EtoileProps) {
                     <StaticModel
                         key={device.id}
                         url={BS_MODEL_URL}
-                        position={[device.x, device.z + 5, device.y]}
+                        position={[
+                            device.position_x,
+                            device.position_z + 5,
+                            device.position_y,
+                        ]}
                         scale={[1, 1, 1]}
                     />
                 )
@@ -767,7 +771,11 @@ function Etoile({ devices = [] }: EtoileProps) {
                     <StaticModel
                         key={device.id}
                         url={JAMMER_MODEL_URL}
-                        position={[device.x, device.z + 5, device.y]}
+                        position={[
+                            device.position_x,
+                            device.position_z + 5,
+                            device.position_y,
+                        ]}
                         scale={[10, 10, 10]}
                     />
                 )

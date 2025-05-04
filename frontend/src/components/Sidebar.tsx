@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { Device } from '../App'
 import '../styles/Sidebar.css'
 
@@ -27,6 +27,75 @@ const Sidebar: React.FC<SidebarProps> = ({
     onCancel,
     hasTempDevices,
 }) => {
+    // 為每個設備的方向值創建本地狀態
+    const [orientationInputs, setOrientationInputs] = useState<{
+        [key: string]: { x: string; y: string; z: string }
+    }>({})
+
+    // 當 devices 更新時，初始化或更新本地輸入狀態
+    useEffect(() => {
+        const newInputs: {
+            [key: string]: { x: string; y: string; z: string }
+        } = {}
+        devices.forEach((device) => {
+            // 如果該設備已有本地輸入狀態，保留它；否則，從設備初始化
+            if (!orientationInputs[device.id]) {
+                newInputs[device.id] = {
+                    x: device.orientation_x?.toString() || '0',
+                    y: device.orientation_y?.toString() || '0',
+                    z: device.orientation_z?.toString() || '0',
+                }
+            } else {
+                newInputs[device.id] = orientationInputs[device.id]
+            }
+        })
+        setOrientationInputs(newInputs)
+    }, [devices])
+
+    // 處理方向輸入的變化
+    const handleOrientationInput = (
+        deviceId: number,
+        axis: 'x' | 'y' | 'z',
+        value: string
+    ) => {
+        // 更新本地狀態
+        setOrientationInputs((prev) => ({
+            ...prev,
+            [deviceId]: {
+                ...prev[deviceId],
+                [axis]: value,
+            },
+        }))
+
+        // 檢查輸入是否包含分數格式
+        if (value.includes('/')) {
+            const parts = value.split('/')
+            if (parts.length === 2) {
+                const numerator = parseFloat(parts[0])
+                const denominator = parseFloat(parts[1])
+                if (
+                    !isNaN(numerator) &&
+                    !isNaN(denominator) &&
+                    denominator !== 0
+                ) {
+                    // 計算分數值並乘以 π
+                    const calculatedValue = (numerator / denominator) * Math.PI
+                    // 更新設備狀態
+                    const orientationKey = `orientation_${axis}` as keyof Device
+                    onDeviceChange(deviceId, orientationKey, calculatedValue)
+                }
+            }
+        } else {
+            // 嘗試將值解析為數字
+            const numValue = parseFloat(value)
+            if (!isNaN(numValue)) {
+                // 更新設備狀態
+                const orientationKey = `orientation_${axis}` as keyof Device
+                onDeviceChange(deviceId, orientationKey, numValue)
+            }
+        }
+    }
+
     return (
         <div className="sidebar-container">
             <div className="sidebar-header">
@@ -94,28 +163,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <table className="device-table">
                                 <thead>
                                     <tr>
-                                        <th></th>
                                         <th>類型</th>
-                                        <th>X</th>
-                                        <th>Y</th>
-                                        <th>Z</th>
+                                        <th>X 位置</th>
+                                        <th>Y 位置</th>
+                                        <th>Z 位置</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <tr>
-                                        <td>
-                                            <input
-                                                type="checkbox"
-                                                checked={device.active}
-                                                onChange={(e) =>
-                                                    onDeviceChange(
-                                                        device.id,
-                                                        'active',
-                                                        e.target.checked
-                                                    )
-                                                }
-                                            />
-                                        </td>
                                         <td>
                                             <select
                                                 value={device.role}
@@ -142,11 +197,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         <td>
                                             <input
                                                 type="number"
-                                                value={device.x}
+                                                value={device.position_x}
                                                 onChange={(e) =>
                                                     onDeviceChange(
                                                         device.id,
-                                                        'x',
+                                                        'position_x',
                                                         parseFloat(
                                                             e.target.value
                                                         ) || 0
@@ -157,11 +212,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         <td>
                                             <input
                                                 type="number"
-                                                value={device.y}
+                                                value={device.position_y}
                                                 onChange={(e) =>
                                                     onDeviceChange(
                                                         device.id,
-                                                        'y',
+                                                        'position_y',
                                                         parseFloat(
                                                             e.target.value
                                                         ) || 0
@@ -172,16 +227,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         <td>
                                             <input
                                                 type="number"
-                                                value={device.z.toFixed(1)}
-                                                step="0.1"
+                                                value={device.position_z}
                                                 onChange={(e) =>
                                                     onDeviceChange(
                                                         device.id,
-                                                        'z',
-                                                        parseFloat(
-                                                            parseFloat(
-                                                                e.target.value
-                                                            ).toFixed(1)
+                                                        'position_z',
+                                                        parseInt(
+                                                            e.target.value,
+                                                            10
                                                         ) || 0
                                                     )
                                                 }
@@ -190,6 +243,92 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     </tr>
                                 </tbody>
                             </table>
+
+                            {device.role !== 'receiver' && (
+                                <table className="device-table orientation-table">
+                                    <thead>
+                                        <tr>
+                                            <th>功率 (dBm)</th>
+                                            <th>X 方向</th>
+                                            <th>Y 方向</th>
+                                            <th>Z 方向</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>
+                                                <input
+                                                    type="number"
+                                                    value={
+                                                        device.power_dbm || 0
+                                                    }
+                                                    onChange={(e) =>
+                                                        onDeviceChange(
+                                                            device.id,
+                                                            'power_dbm',
+                                                            parseInt(
+                                                                e.target.value,
+                                                                10
+                                                            ) || 0
+                                                        )
+                                                    }
+                                                />
+                                            </td>
+                                            <td>
+                                                <input
+                                                    type="text"
+                                                    value={
+                                                        orientationInputs[
+                                                            device.id
+                                                        ]?.x || '0'
+                                                    }
+                                                    onChange={(e) =>
+                                                        handleOrientationInput(
+                                                            device.id,
+                                                            'x',
+                                                            e.target.value
+                                                        )
+                                                    }
+                                                />
+                                            </td>
+                                            <td>
+                                                <input
+                                                    type="text"
+                                                    value={
+                                                        orientationInputs[
+                                                            device.id
+                                                        ]?.y || '0'
+                                                    }
+                                                    onChange={(e) =>
+                                                        handleOrientationInput(
+                                                            device.id,
+                                                            'y',
+                                                            e.target.value
+                                                        )
+                                                    }
+                                                />
+                                            </td>
+                                            <td>
+                                                <input
+                                                    type="text"
+                                                    value={
+                                                        orientationInputs[
+                                                            device.id
+                                                        ]?.z || '0'
+                                                    }
+                                                    onChange={(e) =>
+                                                        handleOrientationInput(
+                                                            device.id,
+                                                            'z',
+                                                            e.target.value
+                                                        )
+                                                    }
+                                                />
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            )}
                         </div>
                     </div>
                 ))}

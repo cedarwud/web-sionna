@@ -13,12 +13,14 @@ class DeviceRole(PyEnum):
 # --- SQLModel Definitions ---
 class DeviceBase(SQLModel):
     name: str = Field(index=True, unique=True)
-    x: int = Field(...)  # required
-    y: int = Field(...)  # required
-    z: int = Field(...)  # required
-    orientation: float = Field(default=0.0)
+    position_x: int = Field(...)  # required
+    position_y: int = Field(...)  # required
+    position_z: int = Field(...)  # required
+    orientation_x: float = Field(default=0.0)
+    orientation_y: float = Field(default=0.0)
+    orientation_z: float = Field(default=0.0)
     role: str = Field(...)  # required
-    power: int = Field(default=0)
+    power_dbm: int = Field(default=0)
     active: bool = Field(default=True, index=True)
 
 

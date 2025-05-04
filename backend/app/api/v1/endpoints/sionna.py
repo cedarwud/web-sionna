@@ -17,14 +17,13 @@ from app.services.sionna_simulation import (  # Import service functions
     get_active_devices_from_db_efficient,
     add_to_scene_safe,
     generate_empty_scene_image,
+    generate_scene_with_devices_image,  # 新增的函數
 )
 from app.core.config import (  # Import constants
     SCENE_WITH_PATHS_IMAGE_PATH,
     CONSTELLATION_IMAGE_PATH,
     STATIC_IMAGES_DIR,
-    GLB_PATH,
     MODELS_DIR,
-    NYCU_GLB_PATH,
 )
 
 # 新增: 導入 run_in_threadpool
@@ -32,30 +31,6 @@ from fastapi.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-# 提供 GLB 模型的端點
-@router.get("/scene", tags=["Sionna Scene"])
-async def get_scene_glb():
-    """
-    提供 3D 模型的 GLB 檔案。
-    """
-    glb_path = None
-    if os.path.exists(NYCU_GLB_PATH) and os.path.getsize(NYCU_GLB_PATH) > 0:
-        glb_path = NYCU_GLB_PATH
-        logger.info(f"Using GLB from NYCU_GLB_PATH: {glb_path}")
-    else:
-        logger.error(
-            f"Neither NYCU_GLB_PATH ({NYCU_GLB_PATH}) nor GLB_PATH ({GLB_PATH}) found or valid."
-        )
-        raise HTTPException(status_code=500, detail="無法找到有效的 scene GLB 檔案。")
-
-    # 4) 直接回傳找到的 GLB
-    return FileResponse(
-        path=glb_path,
-        media_type="model/gltf-binary",
-        filename=os.path.basename(glb_path),
-    )
 
 
 @router.get("/models/{model_name}", tags=["Models"])
@@ -1147,6 +1122,52 @@ async def get_ray_paths(session: AsyncSession = Depends(get_session)):
     except Exception as e:
         logger.exception(f"計算射線路徑時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail=f"計算射線路徑時發生錯誤: {str(e)}")
+
+
+@router.get("/scene-image-devices", tags=["Sionna Simulation"])
+async def get_scene_image_devices_endpoint(
+    session: AsyncSession = Depends(get_session),
+):
+    """Generates and returns the Sionna scene image with devices (without RT paths) using data from DB."""
+    logger.info("--- API Request: /scene-image-devices ---")
+
+    # 定義臨時文件路徑用於儲存生成的場景圖像
+    temp_image_path = STATIC_IMAGES_DIR / "scene_with_devices.png"
+
+    if await generate_scene_with_devices_image(str(temp_image_path), session):
+        if os.path.exists(temp_image_path):
+            file_size = os.path.getsize(temp_image_path)
+            logger.info(
+                f"Returning image for {temp_image_path} (Size: {file_size} bytes)"
+            )
+
+            # 使用StreamingResponse從文件流直接返回
+            def iterfile():
+                with open(temp_image_path, "rb") as f:
+                    # 每次讀取4KB
+                    chunk = f.read(4096)
+                    while chunk:
+                        yield chunk
+                        chunk = f.read(4096)
+
+            return StreamingResponse(
+                iterfile(),
+                media_type="image/png",
+                headers={
+                    "Content-Disposition": f"attachment; filename=scene_with_devices.png"
+                },
+            )
+        else:
+            logger.error(f"File not found after generation: {temp_image_path}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to find scene image with devices after rendering.",
+            )
+    else:
+        logger.error("Failed to render scene with devices.")
+        raise HTTPException(
+            status_code=500, detail="Failed to render scene with devices"
+        )
 
 
 @router.post("/generate-scene-image", tags=["Sionna Scene Management"])

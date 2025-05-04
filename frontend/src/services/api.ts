@@ -18,36 +18,42 @@ export enum DeviceRole {
 export interface Device {
   id: number;
   name: string;
-  x: number;
-  y: number;
-  z: number;
-  orientation?: number;
+  position_x: number;
+  position_y: number;
+  position_z: number;
+  orientation_x?: number;
+  orientation_y?: number;
+  orientation_z?: number;
   role: string; // DeviceRole 的字串值
-  power?: number;
+  power_dbm?: number;
   active: boolean;
 }
 
 // 用於創建設備的介面
 export interface DeviceCreate {
   name: string;
-  x: number;
-  y: number;
-  z: number;
-  orientation?: number;
+  position_x: number;
+  position_y: number;
+  position_z: number;
+  orientation_x?: number;
+  orientation_y?: number;
+  orientation_z?: number;
   role: string;
-  power?: number;
+  power_dbm?: number;
   active: boolean;
 }
 
 // 用於更新設備的介面
 export interface DeviceUpdate {
   name?: string;
-  x?: number;
-  y?: number;
-  z?: number;
-  orientation?: number;
+  position_x?: number;
+  position_y?: number;
+  position_z?: number;
+  orientation_x?: number;
+  orientation_y?: number;
+  orientation_z?: number;
   role?: string;
-  power?: number;
+  power_dbm?: number;
   active?: boolean;
 }
 

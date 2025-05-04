@@ -58,6 +58,7 @@ class DeviceData(BaseModel):
 
     device_model: Device = PydanticField(...)  # Store the original SQLModel object
     position_list: List[float] = None  # Store the position as a list [x, y, z]
+    orientation_list: List[float] = None  # Store the orientation as a list [x, y, z]
     transmitter_role: Optional[DeviceRole] = (
         None  # Store transmitter type if applicable
     )
@@ -104,36 +105,57 @@ async def get_active_devices_from_db_efficient(
 
     # 處理信號發射器
     for dev_model in signal_txs:
-        pos_list = [dev_model.x, dev_model.y, dev_model.z]
+        pos_list = [dev_model.position_x, dev_model.position_y, dev_model.position_z]
+        ori_list = [
+            dev_model.orientation_x,
+            dev_model.orientation_y,
+            dev_model.orientation_z,
+        ]
         device_data = DeviceData(
             device_model=dev_model,
             position_list=pos_list,
+            orientation_list=ori_list,
             transmitter_role=DeviceRole.DESIRED,
         )
         transmitters_data.append(device_data)
         logger.info(
-            f"Processed Active Signal Transmitter: {dev_model.name}, Position: {pos_list}"
+            f"Processed Active Signal Transmitter: {dev_model.name}, Position: {pos_list}, Orientation: {ori_list}"
         )
 
     # 處理干擾源發射器
     for dev_model in jammer_txs:
-        pos_list = [dev_model.x, dev_model.y, dev_model.z]
+        pos_list = [dev_model.position_x, dev_model.position_y, dev_model.position_z]
+        ori_list = [
+            dev_model.orientation_x,
+            dev_model.orientation_y,
+            dev_model.orientation_z,
+        ]
         device_data = DeviceData(
             device_model=dev_model,
             position_list=pos_list,
+            orientation_list=ori_list,
             transmitter_role=DeviceRole.JAMMER,
         )
         transmitters_data.append(device_data)
-        logger.info(f"Processed Active Jammer: {dev_model.name}, Position: {pos_list}")
+        logger.info(
+            f"Processed Active Jammer: {dev_model.name}, Position: {pos_list}, Orientation: {ori_list}"
+        )
 
     # 處理接收器數據
     receivers_data: List[DeviceData] = []
     for dev_model in receivers:
-        pos_list = [dev_model.x, dev_model.y, dev_model.z]
-        device_data = DeviceData(device_model=dev_model, position_list=pos_list)
+        pos_list = [dev_model.position_x, dev_model.position_y, dev_model.position_z]
+        ori_list = [
+            dev_model.orientation_x,
+            dev_model.orientation_y,
+            dev_model.orientation_z,
+        ]
+        device_data = DeviceData(
+            device_model=dev_model, position_list=pos_list, orientation_list=ori_list
+        )
         receivers_data.append(device_data)
         logger.info(
-            f"Processed Active Receiver: {dev_model.name}, Position: {pos_list}"
+            f"Processed Active Receiver: {dev_model.name}, Position: {pos_list}, Orientation: {ori_list}"
         )
 
     return transmitters_data, receivers_data
@@ -346,6 +368,7 @@ async def generate_scene_with_paths_image(
                 sionna_tx = SionnaTransmitter(
                     tx_data.device_model.name,
                     position=tx_data.position_list,
+                    orientation=tx_data.orientation_list,  # 使用儲存的方向信息
                 )
                 sionna_txs_rt.append(sionna_tx)
                 add_to_scene_safe(scene_rt, sionna_tx)
@@ -355,7 +378,9 @@ async def generate_scene_with_paths_image(
         for rx_data in receivers_data:
             if rx_data.position_list:
                 sionna_rx = SionnaReceiver(
-                    rx_data.device_model.name, position=rx_data.position_list
+                    rx_data.device_model.name,
+                    position=rx_data.position_list,
+                    orientation=rx_data.orientation_list,  # 使用儲存的方向信息
                 )
                 sionna_rxs_rt.append(sionna_rx)
                 add_to_scene_safe(scene_rt, sionna_rx)
@@ -511,7 +536,9 @@ async def generate_constellation_plot(
 
         logger.info("Creating Sionna Transmitter/Receiver objects from DeviceData...")
         sionna_signal_tx = SionnaTransmitter(
-            signal_tx_data.device_model.name, position=signal_tx_data.position_list
+            signal_tx_data.device_model.name,
+            position=signal_tx_data.position_list,
+            orientation=signal_tx_data.orientation_list,  # 使用儲存的方向信息
         )
         add_to_scene_safe(scene, sionna_signal_tx)
         added_tx_names.append(signal_tx_data.device_model.name)
@@ -521,6 +548,7 @@ async def generate_constellation_plot(
             sionna_int_tx = SionnaTransmitter(
                 int_tx_data.device_model.name,
                 position=int_tx_data.position_list,
+                orientation=int_tx_data.orientation_list,  # 使用儲存的方向信息
                 color=[0, 0, 0],  # 將干擾源顏色設為黑色
             )
             sionna_jammer_txs.append(sionna_int_tx)
@@ -528,13 +556,19 @@ async def generate_constellation_plot(
             added_tx_names.append(int_tx_data.device_model.name)
 
         sionna_rx = SionnaReceiver(
-            rx_data.device_model.name, position=rx_data.position_list
+            rx_data.device_model.name,
+            position=rx_data.position_list,
+            orientation=rx_data.orientation_list,  # 使用儲存的方向信息
         )
         add_to_scene_safe(scene, sionna_rx)
 
-        sionna_signal_tx.look_at(sionna_rx)
-        for sint_tx in sionna_jammer_txs:
-            sint_tx.look_at(sionna_rx)
+        # 如果方向值為默認值0，動態計算朝向
+        if all(ori == 0.0 for ori in signal_tx_data.orientation_list):
+            sionna_signal_tx.look_at(sionna_rx)
+
+        for i, sint_tx in enumerate(sionna_jammer_txs):
+            if all(ori == 0.0 for ori in jammer_txs_data[i].orientation_list):
+                sint_tx.look_at(sionna_rx)
 
         if not scene.transmitters or not scene.receivers:
             logger.error(
@@ -791,4 +825,100 @@ def generate_empty_scene_image(output_path: str):
         return False
     except Exception as e:
         logger.error(f"Error rendering empty scene via helpers: {e}", exc_info=True)
+        return False
+
+
+# --- New Helper Function: Generate scene image with only devices ---
+async def generate_scene_with_devices_image(
+    output_path: str, session: AsyncSession
+) -> bool:
+    """Generates a scene image with devices but without RT paths."""
+    logger.info("Entering generate_scene_with_devices_image function...")
+    try:
+        # --- 1. Fetch Device Data ---
+        transmitters_data, receivers_data = await get_active_devices_from_db_efficient(
+            session
+        )
+        if not transmitters_data and not receivers_data:
+            logger.error("No active devices found in database.")
+            return False
+
+        # --- 2. Setup Base Pyrender Scene using Helper ---
+        pr_scene = _setup_pyrender_scene_from_glb()  # Helper uses this bg color
+        if pr_scene is None:
+            return False
+        logger.info("Base pyrender scene setup complete.")
+
+        # --- 3. Overlay Devices ---
+        logger.info("Overlaying devices onto pyrender scene...")
+        DEVICE_SIZE = 5.0
+        TX_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[0.0, 0.0, 1.0, 1.0]
+        )
+        RX_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[1.0, 0.0, 0.0, 1.0]
+        )
+        INT_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[0.0, 0.0, 0.0, 1.0]
+        )
+
+        # Add transmitters to scene
+        for tx_data in transmitters_data:
+            if tx_data.position_list:
+                pos = tx_data.position_list
+                render_pos = [pos[0], pos[2] + DEVICE_SIZE, pos[1]]
+                mat = (
+                    INT_MATERIAL_PYRENDER
+                    if tx_data.transmitter_role == DeviceRole.JAMMER
+                    else TX_MATERIAL_PYRENDER
+                )
+                try:
+                    sphere = trimesh.primitives.Sphere(radius=DEVICE_SIZE)
+                    device_mesh = pyrender.Mesh.from_trimesh(sphere, material=mat)
+                    pose_matrix = np.eye(4)
+                    pose_matrix[:3, 3] = render_pos
+                    pr_scene.add(device_mesh, pose=pose_matrix)
+                    logger.info(f"Added TX '{tx_data.device_model.name}' to scene")
+                except Exception as dev_err:
+                    logger.error(
+                        f"Failed adding TX '{tx_data.device_model.name}': {dev_err}",
+                        exc_info=True,
+                    )
+
+        # Add receivers to scene
+        for rx_data in receivers_data:
+            if rx_data.position_list:
+                pos = rx_data.position_list
+                render_pos = [pos[0], pos[2] + DEVICE_SIZE, pos[1]]
+                mat = RX_MATERIAL_PYRENDER
+                try:
+                    sphere = trimesh.primitives.Sphere(radius=DEVICE_SIZE)
+                    device_mesh = pyrender.Mesh.from_trimesh(sphere, material=mat)
+                    pose_matrix = np.eye(4)
+                    pose_matrix[:3, 3] = render_pos
+                    pr_scene.add(device_mesh, pose=pose_matrix)
+                    logger.info(f"Added RX '{rx_data.device_model.name}' to scene")
+                except Exception as dev_err:
+                    logger.error(
+                        f"Failed adding RX '{rx_data.device_model.name}': {dev_err}",
+                        exc_info=True,
+                    )
+
+        logger.info("Devices overlay complete.")
+
+        # --- 4. Render, Crop, and Save using Helper ---
+        success = _render_crop_and_save(
+            pr_scene,
+            output_path,
+            bg_color_float=SCENE_BACKGROUND_COLOR_RGB,
+            padding_x=5,  # Set horizontal padding to 5
+            padding_y=20,  # Keep vertical padding at 20
+        )
+        return success
+
+    except ImportError as ie:
+        logger.error(f"Import error: {ie}", exc_info=True)
+        return False
+    except Exception as e:
+        logger.error(f"Error in generate_scene_with_devices_image: {e}", exc_info=True)
         return False

@@ -1,27 +1,13 @@
--- 先刪除所有資料（注意刪除順序很重要，因為有外鍵約束）
-DELETE FROM transmitter;
-DELETE FROM receiver;
+-- 刪除所有現有設備數據
 DELETE FROM device;
 
 -- 插入發射器設備
-INSERT INTO device (name, device_type, x, y, z, active) 
+INSERT INTO device (name, position_x, position_y, position_z, orientation_x, orientation_y, orientation_z, role, power_dbm, active) 
 VALUES 
-  ('tx0', 'TRANSMITTER', -100, -100, 50, true),
-  ('tx1', 'TRANSMITTER', -100, 50, 50, true),
-  ('tx2', 'TRANSMITTER', 100, -100, 50, true),
-  ('jam1', 'TRANSMITTER', 100, 50, 50, true),
-  ('jam2', 'TRANSMITTER', 50, 50, 50, true),
-  ('jam3', 'TRANSMITTER', -50, -50, 50, true),
-  ('rx0', 'RECEIVER', 0, 0, 30, true);
-
--- 插入發射器記錄，連結發射器設備 (signal 類型)
-INSERT INTO transmitter (id, transmitter_role)
-SELECT id, 'DESIRED' FROM device WHERE name IN ('tx0', 'tx1', 'tx2');
-
--- 插入干擾器記錄，連結干擾器設備 (jammer 類型)
-INSERT INTO transmitter (id, transmitter_role)
-SELECT id, 'JAMMER' FROM device WHERE name IN ('jam1', 'jam2', 'jam3');
-
--- 插入接收器記錄，連結接收器設備
-INSERT INTO receiver (id)
-SELECT id FROM device WHERE name = 'rx0';
+('tx0', -100, -100, 50, 2.618, 0, 0, 'desired', 30, true),
+('tx1', -100, 50, 50, 0.524, 0, 0, 'desired', 30, true),
+('tx2', 100, -100, 50, -1.571, 0, 0, 'desired', 30, true),
+('jam1', 100, 50, 50, 1.571, 0, 0, 'jammer', 40, true),
+('jam2', 50, 50, 50, 1.571, 0, 0, 'jammer', 40, true),
+('jam3', -50, -50, 50, 1.571, 0, 0, 'jammer', 40, true),
+('rx', 0, 0, 50, 0, 0, 0, 'receiver', 0, true);

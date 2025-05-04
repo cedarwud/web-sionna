@@ -16,29 +16,33 @@ import {
     deleteDevice,
 } from './services/api'
 
-// 前端設備介面
+// 前端設備介面 - 與後端保持一致
 export interface Device {
     id: number
     name: string
-    x: number
-    y: number
-    z: number
-    orientation?: number
-    power?: number
+    position_x: number
+    position_y: number
+    position_z: number
+    orientation_x?: number
+    orientation_y?: number
+    orientation_z?: number
+    power_dbm?: number
     active: boolean
     role: string // 使用角色字段
 }
 
-// 轉換後端設備到前端設備格式
+// 轉換後端設備到前端設備格式 - 不再需要轉換，因為結構一致
 const convertBackendToFrontend = (backendDevice: BackendDevice): Device => {
     return {
         id: backendDevice.id,
         name: backendDevice.name,
-        x: backendDevice.x,
-        y: backendDevice.y,
-        z: backendDevice.z,
-        orientation: backendDevice.orientation,
-        power: backendDevice.power,
+        position_x: backendDevice.position_x,
+        position_y: backendDevice.position_y,
+        position_z: backendDevice.position_z,
+        orientation_x: backendDevice.orientation_x,
+        orientation_y: backendDevice.orientation_y,
+        orientation_z: backendDevice.orientation_z,
+        power_dbm: backendDevice.power_dbm,
         active: backendDevice.active,
         role: backendDevice.role, // 保持與後端一致使用 role
     }
@@ -100,11 +104,13 @@ function App() {
                 (_, i) => ({
                     id: -(i + 1), // 負數ID表示臨時數據
                     name: `測試設備 ${i + 1}`,
-                    x: i * 10,
-                    y: i * 10,
-                    z: 0.0,
-                    orientation: 0.0,
-                    power: 0,
+                    position_x: i * 10,
+                    position_y: i * 10,
+                    position_z: 0,
+                    orientation_x: 0,
+                    orientation_y: 0,
+                    orientation_z: 0,
+                    power_dbm: 0,
                     active: true,
                     role: ['desired', 'receiver', 'jammer'][i % 3] as string,
                 })
@@ -182,12 +188,14 @@ function App() {
 
                 const backendData = {
                     name: device.name,
-                    x: device.x,
-                    y: device.y,
-                    z: device.z,
-                    orientation: device.orientation,
+                    position_x: device.position_x,
+                    position_y: device.position_y,
+                    position_z: device.position_z,
+                    orientation_x: device.orientation_x,
+                    orientation_y: device.orientation_y,
+                    orientation_z: device.orientation_z,
                     role: device.role,
-                    power: device.power,
+                    power_dbm: device.power_dbm,
                     active: device.active,
                 }
 
@@ -233,12 +241,14 @@ function App() {
             for (const device of devicesToUpdate) {
                 const backendData = {
                     name: device.name,
-                    x: device.x,
-                    y: device.y,
-                    z: device.z,
-                    orientation: device.orientation,
+                    position_x: device.position_x,
+                    position_y: device.position_y,
+                    position_z: device.position_z,
+                    orientation_x: device.orientation_x,
+                    orientation_y: device.orientation_y,
+                    orientation_z: device.orientation_z,
                     role: device.role,
-                    power: device.power,
+                    power_dbm: device.power_dbm,
                     active: device.active,
                 }
 
@@ -406,11 +416,13 @@ function App() {
         const newDevice: Device = {
             id: tempId,
             name: newName,
-            x: 0,
-            y: 0,
-            z: 0,
-            orientation: 0,
-            power: 0,
+            position_x: 0,
+            position_y: 0,
+            position_z: 0,
+            orientation_x: 0,
+            orientation_y: 0,
+            orientation_z: 0,
+            power_dbm: 0,
             active: true,
             role: defaultRole,
         }

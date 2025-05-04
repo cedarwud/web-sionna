@@ -20,12 +20,14 @@ async def create_device(db: AsyncSession, *, obj_in: DeviceCreate) -> Device:
         # 創建 Device 記錄
         db_device = Device(
             name=obj_in.name,
-            x=obj_in.x,
-            y=obj_in.y,
-            z=obj_in.z,
-            orientation=obj_in.orientation,
+            position_x=obj_in.position_x,
+            position_y=obj_in.position_y,
+            position_z=obj_in.position_z,
+            orientation_x=obj_in.orientation_x,
+            orientation_y=obj_in.orientation_y,
+            orientation_z=obj_in.orientation_z,
             role=obj_in.role,
-            power=obj_in.power,
+            power_dbm=obj_in.power_dbm,
             active=obj_in.active,
         )
         db.add(db_device)

@@ -1,3 +1,5 @@
+curl -X GET "http://localhost:8000/api/v1/sionna/scene-image-devices" -o scene_with_devices.png
+
 curl -X GET http://localhost:8000/api/v1/sionna/scene-image-rt -o /dev/null
 curl -X GET http://localhost:8000/api/v1/sionna/constellation-diagram -o /dev/null
 

@@ -7,12 +7,14 @@ from app.db.models import DeviceRole
 # 基礎 Schema，包含 DeviceBase 的核心欄位
 class DeviceBase(BaseModel):
     name: str
-    x: int
-    y: int
-    z: int
-    orientation: float = PydanticField(default=0.0)
+    position_x: int
+    position_y: int
+    position_z: int
+    orientation_x: float = PydanticField(default=0.0)
+    orientation_y: float = PydanticField(default=0.0)
+    orientation_z: float = PydanticField(default=0.0)
     role: str
-    power: int = PydanticField(default=0)
+    power_dbm: int = PydanticField(default=0)
     active: bool = PydanticField(default=True)
 
 
@@ -24,12 +26,14 @@ class DeviceCreate(DeviceBase):
 # 用於更新 Device 的 Schema (所有欄位都是可選的)
 class DeviceUpdate(BaseModel):
     name: Optional[str] = None
-    x: Optional[int] = None
-    y: Optional[int] = None
-    z: Optional[int] = None
-    orientation: Optional[float] = None
+    position_x: Optional[int] = None
+    position_y: Optional[int] = None
+    position_z: Optional[int] = None
+    orientation_x: Optional[float] = None
+    orientation_y: Optional[float] = None
+    orientation_z: Optional[float] = None
     role: Optional[str] = None
-    power: Optional[int] = None
+    power_dbm: Optional[int] = None
     active: Optional[bool] = None
 
 
