@@ -25,6 +25,7 @@ const SCENE_URL = '/static/models/NYCU.glb'
 const UAV_MODEL_URL = '/api/v1/sionna/models/uav' // 替換為帶動畫的 GLB 模型路徑
 const BS_MODEL_URL = '/api/v1/sionna/models/tx' // BS 模型路徑
 const JAMMER_MODEL_URL = '/api/v1/sionna/models/jammer' // Jammer 模型路徑
+const SATELLITE_TEXTURE_URL = '/static/NYCU/textures/EXPORT_GOOGLE_SAT_WM.png' // 衛星圖路徑
 
 // 材質和尺寸定義
 const DEVICE_SIZE = 5
@@ -762,6 +763,15 @@ function Etoile({
         let maxArea = 0
         let groundMesh: THREE.Mesh | null = null
 
+        // 載入衛星圖貼圖
+        const loader = new TextureLoader()
+        const satelliteTexture = loader.load(SATELLITE_TEXTURE_URL)
+        satelliteTexture.wrapS = RepeatWrapping
+        satelliteTexture.wrapT = RepeatWrapping
+        satelliteTexture.colorSpace = SRGBColorSpace
+        satelliteTexture.repeat.set(1, 1) // 設置為1，顯示完整衛星圖
+        satelliteTexture.anisotropy = 16 // 提高清晰度
+
         root.traverse((o: THREE.Object3D) => {
             if ((o as THREE.Mesh).isMesh) {
                 const m = o as THREE.Mesh
@@ -781,41 +791,10 @@ function Etoile({
                             maxArea = area
                             groundMesh = m
 
-                            const loader = new TextureLoader()
-                            const groundTex = loader.load(
-                                '/textures/groundTex.png'
-                            )
-                            const normalTex = loader.load(
-                                '/textures/normalTex.png'
-                            )
-                            const roughnessTex = loader.load(
-                                '/textures/roughnessTex.png'
-                            )
-                            const displacementTex = loader.load(
-                                '/textures/displacementTex.png'
-                            )
-                            const textures: THREE.Texture[] = [
-                                groundTex,
-                                normalTex,
-                                roughnessTex,
-                                displacementTex,
-                            ]
-                            groundTex.repeat.set(60, 60)
-                            roughnessTex.repeat.set(60, 60)
-                            textures.forEach((tex) => {
-                                tex.wrapS = RepeatWrapping
-                                tex.wrapT = RepeatWrapping
-                                tex.repeat.set(40, 40)
-                                tex.colorSpace = SRGBColorSpace
-                            })
+                            // 將材質設為使用衛星圖的 MeshStandardMaterial
                             groundMesh.material =
                                 new THREE.MeshStandardMaterial({
-                                    map: groundTex,
-                                    normalMap: normalTex,
-                                    roughnessMap: roughnessTex,
-                                    displacementMap: displacementTex,
-                                    displacementScale: 5,
-                                    displacementBias: -2,
+                                    map: satelliteTexture,
                                     color: 0xffffff,
                                     roughness: 0.8,
                                     metalness: 0.1,
@@ -945,7 +924,7 @@ export default function SceneView({
         >
             <Canvas
                 shadows
-                camera={{ position: [0, 400, 0], near: 0.1, far: 1e4 }}
+                camera={{ position: [0, 600, 0], near: 0.1, far: 1e4 }}
                 gl={{
                     toneMapping: THREE.ACESFilmicToneMapping,
                     toneMappingExposure: 1.2, // 增強整體光照效果 -> 調低整體亮度

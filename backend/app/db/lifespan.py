@@ -44,12 +44,12 @@ async def seed_initial_data(session: AsyncSession):
     try:
         # 指定的發射器設備列表
         tx_list = [
-            ("tx0", [-100, -100, 50], [np.pi * 5 / 6, 0, 0], "desired", 30),
-            ("tx1", [-100, 50, 50], [np.pi / 6, 0, 0], "desired", 30),
-            ("tx2", [100, -100, 50], [-np.pi / 2, 0, 0], "desired", 30),
-            ("jam1", [100, 50, 50], [np.pi / 2, 0, 0], "jammer", 40),
-            ("jam2", [50, 50, 50], [np.pi / 2, 0, 0], "jammer", 40),
-            ("jam3", [-50, -50, 50], [np.pi / 2, 0, 0], "jammer", 40),
+            ("tx0", [-100, -100, 0], [np.pi * 5 / 6, 0, 0], "desired", 30),
+            ("tx1", [-100, 50, 0], [np.pi / 6, 0, 0], "desired", 30),
+            ("tx2", [100, -100, 0], [-np.pi / 2, 0, 0], "desired", 30),
+            ("jam1", [100, 50, 0], [np.pi / 2, 0, 0], "jammer", 40),
+            ("jam2", [50, 50, 0], [np.pi / 2, 0, 0], "jammer", 40),
+            ("jam3", [-50, -50, 0], [np.pi / 2, 0, 0], "jammer", 40),
         ]
 
         # 指定的接收器設備

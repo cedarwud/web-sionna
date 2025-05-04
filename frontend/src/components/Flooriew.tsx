@@ -135,7 +135,7 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
             name: '',
             position_x: 0,
             position_y: 0,
-            position_z: 50, // 修改預設值為 50
+            position_z: 5,
             orientation_x: 0,
             orientation_y: 0,
             orientation_z: 0,
