@@ -7,21 +7,11 @@ const API_BASE_URL = isLocalDevelopment
   ? 'http://localhost:8000/api/v1'
   : `http://${window.location.hostname}:8000/api/v1`;
 
-// 設備類型枚舉（對應後端的 DeviceType）
-export enum DeviceType {
-  TRANSMITTER = 'transmitter',
+// 設備角色枚舉（對應後端的 DeviceRole）
+export enum DeviceRole {
+  DESIRED = 'desired',
+  JAMMER = 'jammer',
   RECEIVER = 'receiver',
-}
-
-// 發射器類型枚舉
-export enum TransmitterType {
-  SIGNAL = 'signal',
-  INTERFERER = 'interferer',
-}
-
-// 用於嵌套的發射器數據的介面
-interface TransmitterData {
-  transmitter_type: TransmitterType;
 }
 
 // 設備介面（對應後端的 Device schema）
@@ -31,20 +21,22 @@ export interface Device {
   x: number;
   y: number;
   z: number;
+  orientation?: number;
+  role: string; // DeviceRole 的字串值
+  power?: number;
   active: boolean;
-  device_type: DeviceType;
-  transmitter: TransmitterData | null;
 }
 
 // 用於創建設備的介面
 export interface DeviceCreate {
   name: string;
-  x?: number;
-  y?: number;
-  z?: number;
-  active?: boolean;
-  device_type: DeviceType;
-  transmitter_type?: TransmitterType;
+  x: number;
+  y: number;
+  z: number;
+  orientation?: number;
+  role: string;
+  power?: number;
+  active: boolean;
 }
 
 // 用於更新設備的介面
@@ -53,24 +45,18 @@ export interface DeviceUpdate {
   x?: number;
   y?: number;
   z?: number;
+  orientation?: number;
+  role?: string;
+  power?: number;
   active?: boolean;
-  device_type?: DeviceType;
-  transmitter_type?: TransmitterType;
 }
 
 // 獲取所有設備
-export const getDevices = async (
-  deviceType?: DeviceType,
-  transmitterType?: TransmitterType
-): Promise<Device[]> => {
+export const getDevices = async (role?: string): Promise<Device[]> => {
   let url = `${API_BASE_URL}/devices/?limit=100`;
   
-  if (deviceType) {
-    url += `&device_type=${deviceType}`;
-  }
-  
-  if (transmitterType) {
-    url += `&transmitter_type=${transmitterType}`;
+  if (role) {
+    url += `&role=${role}`;
   }
   
   try {
@@ -78,6 +64,27 @@ export const getDevices = async (
     return response.data;
   } catch (error) {
     console.error('獲取設備列表失敗:', error);
+    throw error;
+  }
+};
+
+// 獲取特定類型的設備（便捷方法）
+export const getJammers = async (): Promise<Device[]> => {
+  try {
+    const response = await axios.get<Device[]>(`${API_BASE_URL}/devices/jammers`);
+    return response.data;
+  } catch (error) {
+    console.error('獲取干擾器列表失敗:', error);
+    throw error;
+  }
+};
+
+export const getReceivers = async (): Promise<Device[]> => {
+  try {
+    const response = await axios.get<Device[]>(`${API_BASE_URL}/devices/receivers`);
+    return response.data;
+  } catch (error) {
+    console.error('獲取接收器列表失敗:', error);
     throw error;
   }
 };
@@ -96,26 +103,6 @@ export const getDeviceById = async (deviceId: number): Promise<Device> => {
 // 創建新設備
 export const createDevice = async (deviceData: DeviceCreate): Promise<Device> => {
   try {
-    // 如果是干擾器類型，使用專門的干擾器API
-    if (deviceData.device_type === DeviceType.TRANSMITTER && 
-        deviceData.transmitter_type === TransmitterType.INTERFERER) {
-      console.log('使用干擾器專用API創建設備');
-      // 轉換為後端期望的干擾器格式 - 包含device_type欄位
-      const interfererData = {
-        name: deviceData.name,
-        x: deviceData.x ?? 0,
-        y: deviceData.y ?? 0,
-        z: deviceData.z ?? 0,
-        active: deviceData.active !== undefined ? deviceData.active : true,
-        device_type: DeviceType.TRANSMITTER  // 後端仍然需要此欄位
-      };
-      console.log('干擾器創建數據:', interfererData);
-      const response = await axios.post<Device>(`${API_BASE_URL}/devices/interferer`, interfererData);
-      return response.data;
-    }
-    
-    // 一般設備創建
-    console.log('使用標準API創建設備');
     const response = await axios.post<Device>(`${API_BASE_URL}/devices/`, deviceData);
     return response.data;
   } catch (error) {
@@ -127,45 +114,6 @@ export const createDevice = async (deviceData: DeviceCreate): Promise<Device> =>
 // 更新現有設備
 export const updateDevice = async (deviceId: number, deviceData: DeviceUpdate): Promise<Device> => {
   try {
-    // 如果是干擾器類型，先檢查這個設備是否已經存在並且是干擾器
-    if (deviceData.device_type === DeviceType.TRANSMITTER && 
-        deviceData.transmitter_type === TransmitterType.INTERFERER) {
-      
-      // 先嘗試獲取此設備信息，檢查它是否已經是干擾器
-      try {
-        const existingDevice = await getDeviceById(deviceId);
-        const isExistingInterferer = existingDevice.device_type === DeviceType.TRANSMITTER && 
-                                     existingDevice.transmitter?.transmitter_type === TransmitterType.INTERFERER;
-        
-        if (isExistingInterferer) {
-          // 確認是干擾器，使用干擾器專用 API
-          console.log(`設備 ID ${deviceId} 確認為干擾器，使用干擾器專用API更新`);
-          const interfererData = {
-            name: deviceData.name,
-            x: deviceData.x,
-            y: deviceData.y, 
-            z: deviceData.z,
-            active: deviceData.active,
-            device_type: DeviceType.TRANSMITTER
-          };
-          const response = await axios.put<Device>(`${API_BASE_URL}/devices/interferer/${deviceId}`, interfererData);
-          return response.data;
-        } else {
-          // 不是現有的干擾器，使用標準 API
-          console.log(`設備 ID ${deviceId} 不是干擾器，使用標準API更新`);
-          const response = await axios.put<Device>(`${API_BASE_URL}/devices/${deviceId}`, deviceData);
-          return response.data;
-        }
-      } catch (error) {
-        // 獲取設備信息失敗，使用標準 API
-        console.log(`獲取設備 ID ${deviceId} 信息失敗，使用標準API更新`);
-        const response = await axios.put<Device>(`${API_BASE_URL}/devices/${deviceId}`, deviceData);
-        return response.data;
-      }
-    }
-    
-    // 一般設備更新
-    console.log(`使用標準API更新設備 ID: ${deviceId}`);
     const response = await axios.put<Device>(`${API_BASE_URL}/devices/${deviceId}`, deviceData);
     return response.data;
   } catch (error) {

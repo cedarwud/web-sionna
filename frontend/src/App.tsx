@@ -1,85 +1,46 @@
 // src/App.tsx
 import { useState, useEffect, useCallback } from 'react'
-import SceneView from './components/SceneView'
+import SceneView from './components/StereogramView'
 import Layout from './components/Layout'
 import Sidebar from './components/Sidebar'
 import Navbar from './components/Navbar'
-import SceneViewer from './components/SceneViewer'
-import ConstellationViewer from './components/ConstellationViewer'
+import SceneViewer from './components/Flooriew'
+import ConstellationViewer from './components/ConstellationView'
 import './App.css'
 import {
     Device as BackendDevice,
-    DeviceType as BackendDeviceType,
-    TransmitterType,
+    DeviceRole,
     getDevices,
     createDevice,
     updateDevice,
     deleteDevice,
 } from './services/api'
 
-// 前端設備類型（簡化版）
-export type DeviceType = 'tx' | 'rx' | 'int'
-
 // 前端設備介面
 export interface Device {
     id: number
-    name: string // 添加名稱字段
+    name: string
     x: number
     y: number
     z: number
+    orientation?: number
+    power?: number
     active: boolean
-    type: DeviceType
-    transmitterType?: TransmitterType // 新增可選欄位
+    role: string // 使用角色字段
 }
 
-// 轉換後端設備類型到前端設備類型
-const mapDeviceType = (
-    backendType: BackendDeviceType,
-    transmitterType?: TransmitterType
-): DeviceType => {
-    if (backendType === BackendDeviceType.TRANSMITTER) {
-        if (transmitterType === TransmitterType.INTERFERER) {
-            return 'int'
-        }
-        return 'tx'
-    }
-    return 'rx'
-}
-
-// 轉換前端設備類型到後端設備類型
-const mapToBackendType = (
-    frontendType: DeviceType
-): {
-    deviceType: BackendDeviceType
-    transmitterType?: TransmitterType
-} => {
-    if (frontendType === 'tx') {
-        return { deviceType: BackendDeviceType.TRANSMITTER }
-    } else if (frontendType === 'int') {
-        return {
-            deviceType: BackendDeviceType.TRANSMITTER,
-            transmitterType: TransmitterType.INTERFERER,
-        }
-    }
-    return { deviceType: BackendDeviceType.RECEIVER }
-}
-
-// 轉換後端設備資料到前端設備格式
+// 轉換後端設備到前端設備格式
 const convertBackendToFrontend = (backendDevice: BackendDevice): Device => {
-    // 從嵌套結構中獲取 transmitter_type
-    const txType = backendDevice.transmitter?.transmitter_type
     return {
         id: backendDevice.id,
         name: backendDevice.name,
         x: backendDevice.x,
         y: backendDevice.y,
         z: backendDevice.z,
+        orientation: backendDevice.orientation,
+        power: backendDevice.power,
         active: backendDevice.active,
-        type: mapDeviceType(
-            backendDevice.device_type,
-            txType // 使用從嵌套結構獲取的值
-        ),
-        transmitterType: txType, // 將獲取的值存儲到前端介面
+        role: backendDevice.role, // 保持與後端一致使用 role
     }
 }
 
@@ -91,12 +52,11 @@ const countActiveDevices = (
     let activeRx = 0
     deviceList.forEach((d) => {
         if (d.active) {
-            if (d.type === 'tx') {
+            if (d.role === 'desired') {
                 activeTx++
-            } else if (d.type === 'rx') {
+            } else if (d.role === 'receiver') {
                 activeRx++
             }
-            // 'int' 類型雖然是 transmitter，但規則是針對 'tx' 和 'rx'
         }
     })
     return { activeTx, activeRx }
@@ -119,7 +79,7 @@ function App() {
             setLoading(true)
             setApiStatus('disconnected')
             console.log('嘗試從API獲取設備數據...')
-            const backendDevices = await getDevices() // backendDevices 現在有嵌套結構
+            const backendDevices = await getDevices()
             console.log('成功獲取設備數據:', backendDevices)
 
             const frontendDevices = backendDevices.map(convertBackendToFrontend)
@@ -143,8 +103,10 @@ function App() {
                     x: i * 10,
                     y: i * 10,
                     z: 0.0,
+                    orientation: 0.0,
+                    power: 0,
                     active: true,
-                    type: ['tx', 'rx', 'int'][i % 3] as DeviceType,
+                    role: ['desired', 'receiver', 'jammer'][i % 3] as string,
                 })
             )
             setTempDevices(defaultDevices)
@@ -172,11 +134,9 @@ function App() {
 
         if (currentActiveTx < 1 || currentActiveRx < 1) {
             alert(
-                '套用失敗：操作後必須至少保留一個啟用的發射器 (tx) 和一個啟用的接收器 (rx)。請檢查設備的啟用狀態。'
+                '套用失敗：操作後必須至少保留一個啟用的發射器 (desired) 和一個啟用的接收器 (receiver)。請檢查設備的啟用狀態。'
             )
-            // 可以選擇是否恢復更改，例如：
-            // handleCancel();
-            return // 阻止執行 API 呼叫
+            return
         }
         // --- 結束：加入檢查邏輯 ---
 
@@ -220,18 +180,15 @@ function App() {
             for (const device of newDevices) {
                 console.log('準備創建新設備:', device)
 
-                const { deviceType, transmitterType } = mapToBackendType(
-                    device.type
-                )
-
                 const backendData = {
                     name: device.name,
                     x: device.x,
                     y: device.y,
                     z: device.z,
+                    orientation: device.orientation,
+                    role: device.role,
+                    power: device.power,
                     active: device.active,
-                    device_type: deviceType,
-                    transmitter_type: transmitterType,
                 }
 
                 console.log('調用 API 創建設備，數據:', backendData)
@@ -249,7 +206,6 @@ function App() {
                     let errorDetail = '未知錯誤'
                     if (error.response?.data?.detail) {
                         if (Array.isArray(error.response.data.detail)) {
-                            // 422錯誤通常會返回一個詳細信息數組
                             errorDetail = error.response.data.detail
                                 .map((item: any) => {
                                     if (item.msg && item.loc) {
@@ -275,23 +231,20 @@ function App() {
 
             // 然後更新已有設備
             for (const device of devicesToUpdate) {
-                const { deviceType, transmitterType } = mapToBackendType(
-                    device.type
-                )
-
                 const backendData = {
                     name: device.name,
                     x: device.x,
                     y: device.y,
                     z: device.z,
+                    orientation: device.orientation,
+                    role: device.role,
+                    power: device.power,
                     active: device.active,
-                    device_type: deviceType,
-                    transmitter_type: transmitterType,
                 }
 
                 console.log(`正在更新設備 ID: ${device.id}，數據:`, backendData)
                 try {
-                    await updateDevice(device.id, backendData) // 調用後端修改 API
+                    await updateDevice(device.id, backendData)
                     console.log(`設備 ID: ${device.id} 更新成功`)
                 } catch (error: any) {
                     // 詳細記錄錯誤
@@ -304,7 +257,6 @@ function App() {
                     let errorDetail = '未知錯誤'
                     if (error.response?.data?.detail) {
                         if (Array.isArray(error.response.data.detail)) {
-                            // 422錯誤通常會返回一個詳細信息數組
                             errorDetail = error.response.data.detail
                                 .map((item: any) => {
                                     if (item.msg && item.loc) {
@@ -335,8 +287,7 @@ function App() {
                 convertBackendToFrontend
             )
             setTempDevices(updatedFrontendDevices)
-            setOriginalDevices(updatedFrontendDevices) // 更新原始狀態為最新已保存狀態
-            // 重置臨時設備標記
+            setOriginalDevices(updatedFrontendDevices)
             setHasTempDevices(false)
             console.log('設備列表已更新，前端應已觸發重新渲染')
         } catch (err: any) {
@@ -360,14 +311,12 @@ function App() {
         // 如果是新添加的、未保存的設備 (ID 為負數)
         if (id < 0) {
             setTempDevices((prev) => prev.filter((device) => device.id !== id))
-            // 標記有臨時更改，因為我們移除了列表中的一項
             setHasTempDevices(true)
             console.log(`已從前端移除臨時設備 ID: ${id}`)
-            return // 直接返回，不執行後續 API 調用
+            return
         }
 
         // --- 開始：現有設備的檢查邏輯 ---
-        // 模擬刪除後的裝置列表
         const devicesAfterDelete = tempDevices.filter(
             (device) => device.id !== id
         )
@@ -376,9 +325,9 @@ function App() {
 
         if (futureActiveTx < 1 || futureActiveRx < 1) {
             alert(
-                '刪除失敗：操作後必須至少保留一個啟用的發射器 (tx) 和一個啟用的接收器 (rx)。'
+                '刪除失敗：操作後必須至少保留一個啟用的發射器 (desired) 和一個啟用的接收器 (receiver)。'
             )
-            return // 阻止執行 API 呼叫
+            return
         }
         // --- 結束：現有設備的檢查邏輯 ---
 
@@ -396,7 +345,7 @@ function App() {
             setLoading(true)
             setError(null)
             console.log(`調用 API 刪除設備 ID: ${id}`)
-            await deleteDevice(id) // 調用後端刪除 API
+            await deleteDevice(id)
             console.log(`設備 ID: ${id} 刪除成功`)
 
             // 從前端狀態中移除已刪除的設備
@@ -404,7 +353,6 @@ function App() {
             setOriginalDevices((prev) =>
                 prev.filter((device) => device.id !== id)
             )
-            // 刪除後，重新檢查是否有未保存的更改
             setHasTempDevices(
                 JSON.stringify(tempDevices) !== JSON.stringify(originalDevices)
             )
@@ -426,16 +374,16 @@ function App() {
         const tempId = -Math.floor(Math.random() * 1000000) - 1
 
         // 根據選定的設備類型生成不同的名稱前綴
-        const getPrefix = (type: DeviceType = 'tx') => {
-            switch (type) {
-                case 'tx':
-                    return 'tx-'
-                case 'rx':
-                    return 'rx-'
-                case 'int':
-                    return 'int-'
+        const getPrefix = (role: string = 'desired') => {
+            switch (role) {
+                case 'desired':
+                    return 'tx'
+                case 'receiver':
+                    return 'rx'
+                case 'jammer':
+                    return 'jammer'
                 default:
-                    return 'device-'
+                    return 'device'
             }
         }
 
@@ -443,8 +391,8 @@ function App() {
         const existingNames = tempDevices.map((device) => device.name)
 
         // 默認設備類型
-        const defaultType: DeviceType = 'tx'
-        const prefix = getPrefix(defaultType)
+        const defaultRole: string = 'desired'
+        const prefix = getPrefix(defaultRole)
 
         // 尋找一個可用的名稱（不在現有名稱列表中）
         let index = 1
@@ -461,8 +409,10 @@ function App() {
             x: 0,
             y: 0,
             z: 0,
+            orientation: 0,
+            power: 0,
             active: true,
-            type: defaultType,
+            role: defaultRole,
         }
 
         // 更新 tempDevices 狀態，添加新的臨時設備
@@ -470,7 +420,6 @@ function App() {
         // 標記有臨時設備
         setHasTempDevices(true)
 
-        // 注意：此時並不調用 API 創建設備
         console.log('已在前端創建臨時設備:', newDevice)
     }
 
@@ -481,30 +430,30 @@ function App() {
         value: any
     ) => {
         setTempDevices((prev) => {
-            if (field === 'type') {
+            if (field === 'role') {
                 const deviceToUpdate = prev.find((d) => d.id === id)
                 if (deviceToUpdate) {
                     const currentName = deviceToUpdate.name
-                    const isDefaultNamingFormat = /^(tx|rx|int)-\d+$/.test(
+                    const isDefaultNamingFormat = /^(tx|rx|jammer)\d+$/.test(
                         currentName
                     )
-                    const newType = value as DeviceType
+                    const newRole = value as string
 
                     // Only auto-update name if it was default or it's a new device
                     if (isDefaultNamingFormat || deviceToUpdate.id < 0) {
-                        const getPrefix = (type: DeviceType): string => {
-                            switch (type) {
-                                case 'tx':
-                                    return 'tx-'
-                                case 'rx':
-                                    return 'rx-'
-                                case 'int':
-                                    return 'int-'
+                        const getPrefix = (role: string): string => {
+                            switch (role) {
+                                case 'desired':
+                                    return 'tx'
+                                case 'receiver':
+                                    return 'rx'
+                                case 'jammer':
+                                    return 'jammer'
                                 default:
-                                    return 'device-'
+                                    return 'device'
                             }
                         }
-                        const newPrefix = getPrefix(newType)
+                        const newPrefix = getPrefix(newRole)
 
                         // Find the max number among existing devices of the NEW type (excluding the current one)
                         let maxNum = 0
@@ -537,31 +486,31 @@ function App() {
                             uniqueName = `${newPrefix}${suffix}`
                         }
 
-                        // Update type and the newly generated name
+                        // Update role and the newly generated name
                         return prev.map((device) =>
                             device.id === id
-                                ? { ...device, type: newType, name: uniqueName }
+                                ? { ...device, role: newRole, name: uniqueName }
                                 : device
                         )
                     }
-                    // If name wasn't default and it's not a new device, just update type
+                    // If name wasn't default and it's not a new device, just update role
                     else {
                         return prev.map((device) =>
                             device.id === id
-                                ? { ...device, type: newType } // Only update type
+                                ? { ...device, role: newRole }
                                 : device
                         )
                     }
                 }
             }
 
-            // Handle other field changes (non-type)
+            // Handle other field changes (non-role)
             return prev.map((device) =>
                 device.id === id ? { ...device, [field]: value } : device
             )
         })
 
-        // 標記為有變更，只要任何設備有變化（無論是新增的還是現有的）
+        // 標記為有變更
         setHasTempDevices(true)
     }
 

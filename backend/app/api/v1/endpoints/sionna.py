@@ -24,7 +24,7 @@ from app.core.config import (  # Import constants
     STATIC_IMAGES_DIR,
     GLB_PATH,
     MODELS_DIR,
-    XIN_GLB_PATH,
+    NYCU_GLB_PATH,
 )
 
 # 新增: 導入 run_in_threadpool
@@ -41,12 +41,12 @@ async def get_scene_glb():
     提供 3D 模型的 GLB 檔案。
     """
     glb_path = None
-    if os.path.exists(XIN_GLB_PATH) and os.path.getsize(XIN_GLB_PATH) > 0:
-        glb_path = XIN_GLB_PATH
-        logger.info(f"Using GLB from XIN_GLB_PATH: {glb_path}")
+    if os.path.exists(NYCU_GLB_PATH) and os.path.getsize(NYCU_GLB_PATH) > 0:
+        glb_path = NYCU_GLB_PATH
+        logger.info(f"Using GLB from NYCU_GLB_PATH: {glb_path}")
     else:
         logger.error(
-            f"Neither XIN_GLB_PATH ({XIN_GLB_PATH}) nor GLB_PATH ({GLB_PATH}) found or valid."
+            f"Neither NYCU_GLB_PATH ({NYCU_GLB_PATH}) nor GLB_PATH ({GLB_PATH}) found or valid."
         )
         raise HTTPException(status_code=500, detail="無法找到有效的 scene GLB 檔案。")
 
@@ -262,8 +262,8 @@ async def get_ray_paths(session: AsyncSession = Depends(get_session)):
                     )
                     color_param = {}
                     if (
-                        tx_data.transmitter_type
-                        and tx_data.transmitter_type.value == "interferer"
+                        tx_data.transmitter_role
+                        and tx_data.transmitter_role.value == "jammer"
                     ):
                         color_param = {"color": [0, 0, 0]}
                     sionna_tx = rt.Transmitter(
@@ -489,7 +489,7 @@ async def get_ray_paths(session: AsyncSession = Depends(get_session)):
                                 logger.info(f"估計延遲時間: {estimated_time}秒")
 
                                 # 確定路徑粗細 - 干擾源線條加粗
-                                line_width = 2.0 if "int" in tx_name.lower() else 1.0
+                                line_width = 2.0 if "jammer" in tx_name.lower() else 1.0
 
                                 # 如果是NLOS路徑，生成多個反射點
                                 if not is_los:

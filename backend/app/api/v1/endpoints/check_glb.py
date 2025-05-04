@@ -7,8 +7,8 @@ import logging
 import numpy as np
 
 # 導入必要的函數和變數
-# from app.api.v1.endpoints.sionna import build_gltf, XIN_GLB_PATH, GLB_PATH # <-- 舊導入
-from app.core.config import XIN_GLB_PATH, GLB_PATH  # <-- 新導入，從設定檔
+# from app.api.v1.endpoints.sionna import build_gltf, NYCU_GLB_PATH, GLB_PATH # <-- 舊導入
+from app.core.config import NYCU_GLB_PATH, GLB_PATH  # <-- 新導入，從設定檔
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -106,7 +106,7 @@ async def check_glb_colors(file_path: str = Form(None), file: UploadFile = File(
 @router.post("/bake-glb", tags=["Sionna Scene"])
 async def bake_glb_to_models(filename: str = Form("scene.baked.glb")):
     """
-    將 XIN.glb (或 fallback 的 scene.glb) 做頂點色淺灰化後
+    將 NYCU.glb (或 fallback 的 scene.glb) 做頂點色淺灰化後
     export 成新的 GLB，並存到 MODELS_DIR/{filename}。
     
     範例：
@@ -114,8 +114,8 @@ async def bake_glb_to_models(filename: str = Form("scene.baked.glb")):
            -d filename="my_baked.glb"
     """
     # 1) 確定要用哪個原始檔
-    if XIN_GLB_PATH.exists() and XIN_GLB_PATH.stat().st_size > 0:
-        src = XIN_GLB_PATH
+    if NYCU_GLB_PATH.exists() and NYCU_GLB_PATH.stat().st_size > 0:
+        src = NYCU_GLB_PATH
     else:
         # fallback: 若 scene.glb 不存在就【報錯】
         if not GLB_PATH.exists() or GLB_PATH.stat().st_size == 0:

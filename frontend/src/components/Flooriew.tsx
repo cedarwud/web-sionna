@@ -10,10 +10,9 @@ import {
     DeviceCreate,
     DeviceUpdate,
     Device as BackendDevice,
-    DeviceType as BackendDeviceType, // 重命名以避免衝突
-    TransmitterType,
+    DeviceRole,
     getDeviceById,
-} from '../services/api' // <--- 修正路徑
+} from '../services/api' // <--- 確保只引入需要的內容
 import { Device } from '../App' // <--- 從 App 引入前端 Device 介面
 
 // 定義 Props 接口
@@ -22,17 +21,16 @@ interface SceneViewerProps {
     refreshDeviceData: () => void // 添加回調函數 prop
 }
 
-// 定義設備類型枚舉
-type DeviceType = 'tx' | 'rx' | 'int'
-
 // 定義新設備的介面
 interface NewDevice {
     name: string
     x: number
     y: number
     z: number
+    orientation: number
+    power: number
     active: boolean
-    type: DeviceType
+    role: string
 }
 
 // 定義靜態路徑指向後端存儲的最後一次成功渲染的圖像
@@ -51,44 +49,24 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         // console.log('--- SceneViewer Component Rendered ---')
 
         // --- Start: Move helper functions inside component scope ---
-        // 轉換前端設備類型到後端
-        const mapToBackendType = useCallback(
-            (
-                frontendType: DeviceType
-            ): {
-                deviceType: BackendDeviceType
-                transmitterType?: TransmitterType
-            } => {
-                if (frontendType === 'tx') {
-                    return { deviceType: BackendDeviceType.TRANSMITTER }
-                } else if (frontendType === 'int') {
-                    return {
-                        deviceType: BackendDeviceType.TRANSMITTER,
-                        transmitterType: TransmitterType.INTERFERER,
-                    }
-                }
-                return { deviceType: BackendDeviceType.RECEIVER }
-            },
-            []
-        )
+        // 轉換前端角色到後端角色
+        const getBackendRole = useCallback((frontendRole: string): string => {
+            // 前端和後端現在使用相同的值（desired/jammer/receiver）
+            return frontendRole
+        }, [])
 
         // 轉換後端設備到前端 NewDevice (用於 Popover)
         const convertBackendToNewDevice = useCallback(
             (backendDevice: BackendDevice): NewDevice => {
-                const txType = backendDevice.transmitter?.transmitter_type
-                const frontendType: DeviceType =
-                    backendDevice.device_type === BackendDeviceType.RECEIVER
-                        ? 'rx'
-                        : txType === TransmitterType.INTERFERER
-                        ? 'int'
-                        : 'tx'
                 return {
                     name: backendDevice.name,
                     x: backendDevice.x,
                     y: backendDevice.y,
                     z: backendDevice.z,
+                    orientation: backendDevice.orientation || 0, // 提供預設值
+                    power: backendDevice.power || 0, // 提供預設值
                     active: backendDevice.active,
-                    type: frontendType,
+                    role: backendDevice.role, // 使用 role 而非 type
                 }
             },
             []
@@ -134,8 +112,10 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
             x: 0,
             y: 0,
             z: 0,
+            orientation: 0,
+            power: 0,
             active: true,
-            type: 'tx',
+            role: 'desired',
         })
         const [isEditing, setIsEditing] = useState<boolean>(false)
         const [editingDeviceId, setEditingDeviceId] = useState<number | null>(
@@ -260,9 +240,13 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
 
         // 生成新設備名稱的函數 - 需要調整以使用 props 中的 devices
         const generateDeviceName = useCallback(
-            (type: DeviceType, currentDevices: Device[]) => {
+            (role: string, currentDevices: Device[]) => {
                 const prefix =
-                    type === 'tx' ? 'tx-' : type === 'rx' ? 'rx-' : 'int-'
+                    role === 'desired'
+                        ? 'tx'
+                        : role === 'receiver'
+                        ? 'rx'
+                        : 'jam'
                 const typeDevices = currentDevices.filter((d) =>
                     d.name.startsWith(prefix)
                 )
@@ -751,12 +735,14 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                         // 生成名稱並設置初始 popover 數據 using calculated sceneCoords
                         const initialDevice = {
                             z: popoverDevice.z,
+                            orientation: popoverDevice.orientation,
+                            power: popoverDevice.power,
                             active: popoverDevice.active,
-                            type: popoverDevice.type,
+                            role: popoverDevice.role,
                             x: sceneCoords.x, // Use correct scene coords
                             y: sceneCoords.y, // Use correct scene coords
                             name: generateDeviceName(
-                                popoverDevice.type,
+                                popoverDevice.role,
                                 propDevices
                             ),
                         }
@@ -772,7 +758,7 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                 generateDeviceName, // Existing
                 popoverDevice.z, // Existing (for default values)
                 popoverDevice.active, // Existing (for default values)
-                popoverDevice.type, // Existing (for default values)
+                popoverDevice.role, // Existing (for default values)
                 sceneToImageCoords, // Updated
                 imageToSceneCoords, // Updated
                 imageNaturalSize, // New
@@ -783,158 +769,49 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         )
 
         // 處理 Popover 內設備屬性變更
-        const handleDeviceChange = useCallback(
-            (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-                const { name, value, type } = e.target
-                // Correctly get 'checked' for checkboxes
-                const checked = (e.target as HTMLInputElement).checked
-
-                setPopoverDevice((prev) => {
-                    let updatedDevice = { ...prev }
-
-                    if (name === 'type') {
-                        const newType = value as DeviceType
-                        const currentDevice = propDevices.find(
-                            (d) => d.id === editingDeviceId
-                        )
-                        const isDefaultNameFormat =
-                            currentDevice &&
-                            /^(tx|rx|int)-[0-9]+$/.test(currentDevice.name)
-
-                        if (!isEditing || isDefaultNameFormat) {
-                            const newName = generateDeviceName(
-                                newType,
-                                propDevices
-                            )
-                            updatedDevice = {
-                                ...updatedDevice,
-                                type: newType,
-                                name: newName,
-                            }
-                        } else {
-                            updatedDevice = { ...updatedDevice, type: newType }
-                        }
-                    } else if (name === 'active') {
-                        // Use the 'checked' variable obtained above
-                        updatedDevice = { ...updatedDevice, active: checked }
-                    } else if (name === 'name') {
-                        updatedDevice = { ...updatedDevice, name: value }
-                    } else {
-                        // Use 'type' attribute from target for number check
-                        const newValue =
-                            type === 'number' ? parseFloat(value) || 0 : value
-                        updatedDevice = { ...updatedDevice, [name]: newValue }
-                    }
-                    return updatedDevice
-                })
-            },
-            [propDevices, generateDeviceName, isEditing, editingDeviceId]
-        )
-
-        // 處理應用 Popover 的更改 (新增或編輯)
-        const handleApplyPopover = useCallback(async () => {
-            try {
-                const { deviceType, transmitterType: originalTransmitterType } =
-                    mapToBackendType(popoverDevice.type)
-
-                // Determine the final transmitterType for the payload
-                const finalTransmitterType =
-                    deviceType === BackendDeviceType.TRANSMITTER &&
-                    !originalTransmitterType
-                        ? TransmitterType.SIGNAL // Explicitly set SIGNAL for 'tx'
-                        : originalTransmitterType // Use INTERFERER for 'int' or undefined for 'rx'
-
-                if (isEditing && editingDeviceId !== null) {
-                    // --- 更新設備 ---
-                    console.log(
-                        `準備更新設備 ID: ${editingDeviceId}`,
-                        popoverDevice
-                    )
-                    const devicePayload: DeviceUpdate = {
-                        name: popoverDevice.name,
-                        x: popoverDevice.x,
-                        y: popoverDevice.y,
-                        z: popoverDevice.z,
-                        active: popoverDevice.active,
-                        device_type: deviceType,
-                        transmitter_type: finalTransmitterType,
-                    }
-                    console.log(
-                        'Calling updateDevice with payload:',
-                        devicePayload
-                    )
-                    const updated = await updateDevice(
-                        editingDeviceId,
-                        devicePayload
-                    )
-                    console.log('Device updated successfully:', updated)
-                    alert(`成功更新設備: ${updated.name}`)
-                } else {
-                    // --- 新增設備 ---
-                    console.log('準備新增設備', popoverDevice)
-                    const devicePayload: DeviceCreate = {
-                        name: popoverDevice.name,
-                        x: popoverDevice.x,
-                        y: popoverDevice.y,
-                        z: popoverDevice.z,
-                        active: popoverDevice.active,
-                        device_type: deviceType,
-                        transmitter_type: finalTransmitterType,
-                    }
-                    console.log(
-                        'Calling createDevice with payload:',
-                        devicePayload
-                    )
-                    const created = await createDevice(devicePayload)
-                    console.log('Device created successfully:', created)
-                    alert(`成功新增設備: ${created.name}`)
-                    // 重置 Popover 狀態為下次新增做準備
-                    setPopoverDevice({
-                        name: '',
-                        x: 0,
-                        y: 0,
-                        z: 0,
-                        active: true,
-                        type: 'tx',
-                    })
+        const handlePopoverInputChange = (field: string, value: any) => {
+            const updatedDevice = { ...popoverDevice }
+            if (field === 'role') {
+                const newRole = value as string
+                if (
+                    newRole === 'desired' ||
+                    newRole === 'receiver' ||
+                    newRole === 'jammer'
+                ) {
+                    updatedDevice.role = newRole
                 }
-
-                handleClosePopover()
-                fetchImage(new AbortController().signal) // 更新場景圖
-                refreshDeviceData() // 更新 App 狀態
-            } catch (error: any) {
-                console.error(
-                    `Failed to ${isEditing ? 'update' : 'add'} device:`,
-                    error
+            } else if (field === 'name') {
+                updatedDevice.name = value
+            } else if (field === 'x') {
+                updatedDevice.x = Math.round(value)
+            } else if (field === 'y') {
+                updatedDevice.y = Math.round(value)
+            } else if (field === 'z') {
+                updatedDevice.z = parseFloat(parseFloat(value).toFixed(1))
+            } else if (field === 'orientation') {
+                updatedDevice.orientation = parseFloat(
+                    parseFloat(value).toFixed(1)
                 )
-                let errorMessage = `${isEditing ? '更新' : '新增'}設備失敗`
-                if (error.response?.data?.detail) {
-                    if (Array.isArray(error.response.data.detail)) {
-                        errorMessage +=
-                            ': ' +
-                            error.response.data.detail
-                                .map(
-                                    (item: any) =>
-                                        item.msg || JSON.stringify(item)
-                                )
-                                .join('; ')
-                    } else {
-                        errorMessage += ': ' + error.response.data.detail
-                    }
-                } else if (error.message) {
-                    errorMessage += ': ' + error.message
-                }
-                alert(errorMessage)
+            } else if (field === 'power') {
+                updatedDevice.power = parseInt(value)
+            } else if (field === 'active') {
+                updatedDevice.active = value
             }
-        }, [
-            popoverDevice,
-            isEditing,
-            editingDeviceId,
-            fetchImage,
-            refreshDeviceData,
-            handleClosePopover,
-            mapToBackendType,
-        ])
+            setPopoverDevice(updatedDevice)
+        }
+
+        // 修復 handleApplyPopover 函數
+        const handleApplyPopover = async (e: React.FormEvent) => {
+            e.preventDefault()
+
+            if (isEditing && editingDeviceId) {
+                // 更新現有設備
+                handleUpdateDevice(e)
+            } else {
+                // 創建新設備
+                handleCreateNewDevice(e)
+            }
+        }
 
         // 新增：處理刪除設備
         const handleDeleteDevice = useCallback(async () => {
@@ -999,6 +876,134 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
             // Cleanup listener on component unmount
             return () => window.removeEventListener('resize', calculateHeight)
         }, []) // Empty dependency array means this runs once on mount and cleans up on unmount
+
+        // 修改 handleNodeClick 函數，添加 orientation 和 power
+        const handleNodeClick = useCallback(
+            async (deviceId: number, e: React.MouseEvent) => {
+                e.stopPropagation() // 防止冒泡到圖像的點擊處理
+                try {
+                    const backendDevice = await getDeviceById(deviceId)
+                    const device = propDevices.find((d) => d.id === deviceId)
+                    if (!device) return // 防止錯誤
+
+                    const { x, y } = device
+
+                    // 獲取元素位置
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const clientX = rect.left + rect.width / 2 // 中心點 X
+                    const clientY = rect.top + rect.height / 2 // 中心點 Y
+
+                    // 更新編輯相關狀態
+                    setIsEditing(true)
+                    setEditingDeviceId(deviceId)
+                    setPopoverPosition({
+                        x,
+                        y,
+                        clientX,
+                        clientY,
+                        sceneX: x,
+                        sceneY: y,
+                    })
+
+                    // 更新 popoverDevice 狀態，處理可能不存在的欄位
+                    setPopoverDevice({
+                        name: device.name,
+                        x: device.x,
+                        y: device.y,
+                        z: device.z,
+                        orientation: device.orientation || 0, // 提供預設值
+                        power: device.power || 0, // 提供預設值
+                        active: device.active,
+                        role: device.role,
+                    })
+
+                    setShowPopover(true)
+                } catch (error) {
+                    console.error(`獲取設備 ID ${deviceId} 失敗:`, error)
+                }
+            },
+            [propDevices]
+        )
+
+        // 添加創建設備函數
+        const handleCreateNewDevice = async (e: React.FormEvent) => {
+            e.preventDefault()
+            if (!popoverPosition) return
+
+            try {
+                // 準備設備資料
+                const backendData: DeviceCreate = {
+                    name: popoverDevice.name,
+                    x: popoverDevice.x,
+                    y: popoverDevice.y,
+                    z: popoverDevice.z,
+                    orientation: popoverDevice.orientation,
+                    power: popoverDevice.power,
+                    active: popoverDevice.active,
+                    role: popoverDevice.role, // 使用前端的 role 填充後端的 role
+                }
+
+                // 呼叫 API
+                const createdDevice = await createDevice(backendData)
+                console.log('設備創建成功:', createdDevice)
+
+                // 清理狀態
+                setShowPopover(false)
+                setPopoverPosition(null)
+                setPopoverDevice({
+                    name: '',
+                    x: 0,
+                    y: 0,
+                    z: 0,
+                    orientation: 0,
+                    power: 0,
+                    active: true,
+                    role: 'desired',
+                })
+
+                // 重新獲取所有設備
+                refreshDeviceData()
+            } catch (error) {
+                console.error('創建設備失敗:', error)
+                // 可以額外添加錯誤處理邏輯
+            }
+        }
+
+        // 添加更新設備函數
+        const handleUpdateDevice = async (e: React.FormEvent) => {
+            e.preventDefault()
+            if (!editingDeviceId) return
+
+            try {
+                // 準備更新資料
+                const updateData: DeviceUpdate = {
+                    name: popoverDevice.name,
+                    x: popoverDevice.x,
+                    y: popoverDevice.y,
+                    z: popoverDevice.z,
+                    orientation: popoverDevice.orientation,
+                    power: popoverDevice.power,
+                    active: popoverDevice.active,
+                    role: popoverDevice.role, // 使用前端的 role 填充後端的 role
+                }
+
+                // 呼叫 API
+                await updateDevice(editingDeviceId, updateData)
+                console.log(`設備 ID: ${editingDeviceId} 更新成功`)
+
+                // 清理狀態
+                setShowPopover(false)
+                setPopoverPosition(null)
+                setIsEditing(false)
+                setEditingDeviceId(null)
+
+                // 重新獲取所有設備
+                refreshDeviceData()
+            } catch (error) {
+                console.error(`更新設備 ID: ${editingDeviceId} 失敗:`, error)
+                // 可以額外添加錯誤處理邏輯
+            }
+        }
 
         return (
             <div
@@ -1066,7 +1071,12 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                     type="text"
                                     name="name"
                                     value={popoverDevice.name}
-                                    onChange={handleDeviceChange}
+                                    onChange={(e) =>
+                                        handlePopoverInputChange(
+                                            'name',
+                                            e.target.value
+                                        )
+                                    }
                                     placeholder="設備名稱"
                                     style={{
                                         width: '100%',
@@ -1199,8 +1209,11 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                                     checked={
                                                         popoverDevice.active
                                                     }
-                                                    onChange={
-                                                        handleDeviceChange
+                                                    onChange={(e) =>
+                                                        handlePopoverInputChange(
+                                                            'active',
+                                                            e.target.checked
+                                                        )
                                                     }
                                                     style={{
                                                         width: '16px',
@@ -1218,10 +1231,14 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                                 }}
                                             >
                                                 <select
-                                                    name="type"
-                                                    value={popoverDevice.type}
-                                                    onChange={
-                                                        handleDeviceChange
+                                                    name="role"
+                                                    value={popoverDevice.role}
+                                                    onChange={(e) =>
+                                                        handlePopoverInputChange(
+                                                            'role',
+                                                            e.target
+                                                                .value as string
+                                                        )
                                                     }
                                                     style={{
                                                         width: '100%',
@@ -1234,14 +1251,14 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                                         boxSizing: 'border-box',
                                                     }}
                                                 >
-                                                    <option value="tx">
+                                                    <option value="desired">
                                                         Tx
                                                     </option>
-                                                    <option value="rx">
+                                                    <option value="receiver">
                                                         Rx
                                                     </option>
-                                                    <option value="int">
-                                                        Int
+                                                    <option value="jammer">
+                                                        Jam
                                                     </option>
                                                 </select>
                                             </td>
@@ -1256,8 +1273,11 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                                     type="number"
                                                     name="x"
                                                     value={popoverDevice.x}
-                                                    onChange={
-                                                        handleDeviceChange
+                                                    onChange={(e) =>
+                                                        handlePopoverInputChange(
+                                                            'x',
+                                                            e.target.value
+                                                        )
                                                     }
                                                     style={{
                                                         width: '100%',
@@ -1283,8 +1303,11 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                                     type="number"
                                                     name="y"
                                                     value={popoverDevice.y}
-                                                    onChange={
-                                                        handleDeviceChange
+                                                    onChange={(e) =>
+                                                        handlePopoverInputChange(
+                                                            'y',
+                                                            e.target.value
+                                                        )
                                                     }
                                                     style={{
                                                         width: '100%',
@@ -1310,8 +1333,11 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                                     type="number"
                                                     name="z"
                                                     value={popoverDevice.z}
-                                                    onChange={
-                                                        handleDeviceChange
+                                                    onChange={(e) =>
+                                                        handlePopoverInputChange(
+                                                            'z',
+                                                            e.target.value
+                                                        )
                                                     }
                                                     style={{
                                                         width: '100%',

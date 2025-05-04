@@ -19,7 +19,7 @@ from sqlmodel import select
 import collections.abc  # Import for checking iterable
 
 # Import models and config from their new locations
-from app.db.models import Device, Transmitter, Receiver, DeviceType, TransmitterType
+from app.db.models import Device, DeviceRole
 from app.core.config import OUTPUT_DIR
 from app.crud import crud_device  # 導入整合後的 crud_device 模塊
 
@@ -30,7 +30,7 @@ from PIL import Image
 import io
 
 # 從 config 導入
-from app.core.config import XIN_GLB_PATH, OUTPUT_DIR  # 確保導入 XIN_GLB_PATH
+from app.core.config import NYCU_GLB_PATH, OUTPUT_DIR  # 確保導入 NYCU_GLB_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ SCENE_BACKGROUND_COLOR_RGB = [0.5, 0.5, 0.5]
 #     / "static"
 # )
 # MODELS_DIR = STATIC_DIR / "models"
-# XIN_GLB_PATH = MODELS_DIR / "XIN.glb"  # 優先使用的 GLB 檔案
+# NYCU_GLB_PATH = MODELS_DIR / "NYCU.glb"  # 優先使用的 GLB 檔案
 
 
 # --- 定義新的資料容器 ---
@@ -58,7 +58,7 @@ class DeviceData(BaseModel):
 
     device_model: Device = PydanticField(...)  # Store the original SQLModel object
     position_list: List[float] = None  # Store the position as a list [x, y, z]
-    transmitter_type: Optional[TransmitterType] = (
+    transmitter_role: Optional[DeviceRole] = (
         None  # Store transmitter type if applicable
     )
 
@@ -85,16 +85,16 @@ async def get_active_devices_from_db_efficient(
     logger.info("Fetching active devices from database (efficient version)...")
 
     # 為特定需求獲取發射器
-    signal_txs = await crud_device.get_transmitters_by_type(
-        db=session, transmitter_type=TransmitterType.SIGNAL, active_only=True
+    signal_txs = await get_transmitters_by_type(
+        db=session, transmitter_role=DeviceRole.DESIRED, active_only=True
     )
-    interferer_txs = await crud_device.get_transmitters_by_type(
-        db=session, transmitter_type=TransmitterType.INTERFERER, active_only=True
+    jammer_txs = await get_transmitters_by_type(
+        db=session, transmitter_role=DeviceRole.JAMMER, active_only=True
     )
 
     # 獲取接收器
     receivers_query = select(Device).where(
-        Device.active == True, Device.device_type == DeviceType.RECEIVER
+        Device.active == True, Device.role == DeviceRole.RECEIVER.value
     )
     receivers_result = await session.execute(receivers_query)
     receivers = receivers_result.scalars().all()
@@ -108,7 +108,7 @@ async def get_active_devices_from_db_efficient(
         device_data = DeviceData(
             device_model=dev_model,
             position_list=pos_list,
-            transmitter_type=TransmitterType.SIGNAL,
+            transmitter_role=DeviceRole.DESIRED,
         )
         transmitters_data.append(device_data)
         logger.info(
@@ -116,17 +116,15 @@ async def get_active_devices_from_db_efficient(
         )
 
     # 處理干擾源發射器
-    for dev_model in interferer_txs:
+    for dev_model in jammer_txs:
         pos_list = [dev_model.x, dev_model.y, dev_model.z]
         device_data = DeviceData(
             device_model=dev_model,
             position_list=pos_list,
-            transmitter_type=TransmitterType.INTERFERER,
+            transmitter_role=DeviceRole.JAMMER,
         )
         transmitters_data.append(device_data)
-        logger.info(
-            f"Processed Active Interferer: {dev_model.name}, Position: {pos_list}"
-        )
+        logger.info(f"Processed Active Jammer: {dev_model.name}, Position: {pos_list}")
 
     # 處理接收器數據
     receivers_data: List[DeviceData] = []
@@ -141,16 +139,37 @@ async def get_active_devices_from_db_efficient(
     return transmitters_data, receivers_data
 
 
+# 本地實現get_transmitters_by_type函數
+async def get_transmitters_by_type(
+    db: AsyncSession,
+    *,
+    transmitter_role: DeviceRole,
+    active_only: bool = False,
+) -> List[Device]:
+    """
+    根據發射器角色（DESIRED或JAMMER）獲取設備。
+    """
+    logger.debug(f"Fetching transmitters with role: {transmitter_role}")
+    # 使用role值進行查詢
+    query = select(Device).where(Device.role == transmitter_role.value)
+
+    if active_only:
+        query = query.where(Device.active == True)
+
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
 # --- Helper Function for Pyrender Scene Setup ---
 def _setup_pyrender_scene_from_glb() -> Optional[pyrender.Scene]:
     """Loads GLB, sets up pyrender scene, lights, camera. Returns Scene or None on error."""
-    logger.info(f"Setting up base pyrender scene from GLB: {XIN_GLB_PATH}")
+    logger.info(f"Setting up base pyrender scene from GLB: {NYCU_GLB_PATH}")
     try:
         # 1. Load GLB
-        if not os.path.exists(XIN_GLB_PATH) or os.path.getsize(XIN_GLB_PATH) == 0:
-            logger.error(f"GLB file not found or empty: {XIN_GLB_PATH}")
+        if not os.path.exists(NYCU_GLB_PATH) or os.path.getsize(NYCU_GLB_PATH) == 0:
+            logger.error(f"GLB file not found or empty: {NYCU_GLB_PATH}")
             return None
-        scene_tm = trimesh.load(XIN_GLB_PATH, force="scene")
+        scene_tm = trimesh.load(NYCU_GLB_PATH, force="scene")
         logger.info("GLB file loaded.")
 
         # 2. Create pyrender scene with background and ambient light
@@ -386,7 +405,7 @@ async def generate_scene_with_paths_image(
                 render_pos = [pos[0], pos[2] + DEVICE_SIZE, pos[1]]
                 mat = (
                     INT_MATERIAL_PYRENDER
-                    if tx_data.transmitter_type == TransmitterType.INTERFERER
+                    if tx_data.transmitter_role == DeviceRole.JAMMER
                     else TX_MATERIAL_PYRENDER
                 )
                 try:
@@ -469,12 +488,12 @@ async def generate_constellation_plot(
         signal_txs_data = [
             tx
             for tx in transmitters_data
-            if tx.transmitter_type == TransmitterType.SIGNAL and tx.position_list
+            if tx.transmitter_role == DeviceRole.DESIRED and tx.position_list
         ]
-        interferer_txs_data = [
+        jammer_txs_data = [
             tx
             for tx in transmitters_data
-            if tx.transmitter_type == TransmitterType.INTERFERER and tx.position_list
+            if tx.transmitter_role == DeviceRole.JAMMER and tx.position_list
         ]
 
         if not signal_txs_data:
@@ -497,14 +516,14 @@ async def generate_constellation_plot(
         add_to_scene_safe(scene, sionna_signal_tx)
         added_tx_names.append(signal_tx_data.device_model.name)
 
-        sionna_interferer_txs = []
-        for int_tx_data in interferer_txs_data:
+        sionna_jammer_txs = []
+        for int_tx_data in jammer_txs_data:
             sionna_int_tx = SionnaTransmitter(
                 int_tx_data.device_model.name,
                 position=int_tx_data.position_list,
                 color=[0, 0, 0],  # 將干擾源顏色設為黑色
             )
-            sionna_interferer_txs.append(sionna_int_tx)
+            sionna_jammer_txs.append(sionna_int_tx)
             add_to_scene_safe(scene, sionna_int_tx)
             added_tx_names.append(int_tx_data.device_model.name)
 
@@ -514,7 +533,7 @@ async def generate_constellation_plot(
         add_to_scene_safe(scene, sionna_rx)
 
         sionna_signal_tx.look_at(sionna_rx)
-        for sint_tx in sionna_interferer_txs:
+        for sint_tx in sionna_jammer_txs:
             sint_tx.look_at(sionna_rx)
 
         if not scene.transmitters or not scene.receivers:
@@ -559,7 +578,7 @@ async def generate_constellation_plot(
             h_np = np.array([h_np]) if np.isscalar(h_np) else np.array(h_np)
         logger.info(f"Processed Taps h_np shape: {h_np.shape}")
 
-        # --- 4. Assign Main and Interferer Channels ---
+        # --- 4. Assign Main and Jammer Channels ---
         scene_tx_names = added_tx_names
         taps_dim = h_np.shape[0] if h_np.ndim > 0 else 0
         logger.info(f"Transmitters added to scene (used for taps): {scene_tx_names}")
@@ -572,7 +591,7 @@ async def generate_constellation_plot(
 
         h_main_scalar = 0 + 0j  # Initialize as complex scalar
         h_int_total_scalar = 0 + 0j  # Initialize as complex scalar
-        num_interferers_in_taps = 0
+        num_jammers_in_taps = 0
 
         # Iterate through the taps based on the order transmitters were added
         for i, tx_name in enumerate(scene_tx_names):
@@ -602,11 +621,11 @@ async def generate_constellation_plot(
                 # Assign to h_main_scalar or add to h_int_total_scalar
                 if tx_name == signal_tx_data.device_model.name:
                     h_main_scalar = complex(tap_scalar)  # Ensure it's complex
-                elif tx_name in [itx.device_model.name for itx in interferer_txs_data]:
+                elif tx_name in [itx.device_model.name for itx in jammer_txs_data]:
                     h_int_total_scalar += complex(
                         tap_scalar
                     )  # Ensure it's complex before adding
-                    num_interferers_in_taps += 1
+                    num_jammers_in_taps += 1
                 # ***** 結束修正 *****
             else:
                 logger.warning(
@@ -615,7 +634,7 @@ async def generate_constellation_plot(
 
         logger.info(f"h_main_scalar: {h_main_scalar}")
         logger.info(
-            f"h_int_total_scalar (sum of {num_interferers_in_taps} active interferers found in taps): {h_int_total_scalar}"
+            f"h_int_total_scalar (sum of {num_jammers_in_taps} active jammers found in taps): {h_int_total_scalar}"
         )
 
         # --- 5. Baseband Simulation ---
@@ -687,9 +706,9 @@ async def generate_constellation_plot(
         ax[1].scatter(y_eq_with_i.real, y_eq_with_i.imag, s=4, alpha=0.25)
         # Use h_int_total_scalar for title check
         ttl = (
-            f"With interferer(s) (JNR = {jnr_db:.1f} dB)"
+            f"With jammer(s) (JNR = {jnr_db:.1f} dB)"
             if np.abs(h_int_total_scalar) > 1e-15
-            else "Interferer(s) absent/weak"
+            else "Jammer(s) absent/weak"
         )
         ax[1].set(
             title=ttl,

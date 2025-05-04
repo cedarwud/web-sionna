@@ -3,22 +3,25 @@ DELETE FROM transmitter;
 DELETE FROM receiver;
 DELETE FROM device;
 
--- 重設序列（如果有使用自增ID）
-ALTER SEQUENCE device_id_seq RESTART WITH 1;
+-- 插入發射器設備
+INSERT INTO device (name, device_type, x, y, z, active) 
+VALUES 
+  ('tx0', 'TRANSMITTER', -100, -100, 50, true),
+  ('tx1', 'TRANSMITTER', -100, 50, 50, true),
+  ('tx2', 'TRANSMITTER', 100, -100, 50, true),
+  ('jam1', 'TRANSMITTER', 100, 50, 50, true),
+  ('jam2', 'TRANSMITTER', 50, 50, 50, true),
+  ('jam3', 'TRANSMITTER', -50, -50, 50, true),
+  ('rx0', 'RECEIVER', 0, 0, 30, true);
 
--- 插入設備數據 - 使用枚舉值而非字符串
-INSERT INTO device (name, device_type, x, y, z, active) VALUES
-('tx-1', 'TRANSMITTER', 0.0, 100.0, 33.0, true),
-('int-1', 'TRANSMITTER', 100.0, 0, 29.0, true),  -- 假設 interferer 也是 TRANSMITTER 類型
-('rx-1', 'RECEIVER', 0.0, 0.0, 50, true);
+-- 插入發射器記錄，連結發射器設備 (signal 類型)
+INSERT INTO transmitter (id, transmitter_role)
+SELECT id, 'DESIRED' FROM device WHERE name IN ('tx0', 'tx1', 'tx2');
 
--- 插入發射器數據 - 使用枚舉值並修正引用的 name
-INSERT INTO transmitter (id, transmitter_type)
-SELECT id, 'SIGNAL' FROM device WHERE name = 'tx-1'; -- 修正 name 為 'tx-1'
+-- 插入干擾器記錄，連結干擾器設備 (jammer 類型)
+INSERT INTO transmitter (id, transmitter_role)
+SELECT id, 'JAMMER' FROM device WHERE name IN ('jam1', 'jam2', 'jam3');
 
-INSERT INTO transmitter (id, transmitter_type)
-SELECT id, 'INTERFERER' FROM device WHERE name = 'int-1'; -- 修正 name 為 'int-1'
-
--- 插入接收器數據 - 修正引用的 name
+-- 插入接收器記錄，連結接收器設備
 INSERT INTO receiver (id)
-SELECT id FROM device WHERE name = 'rx-1'; -- 修正 name 為 'rx-1'
+SELECT id FROM device WHERE name = 'rx0';

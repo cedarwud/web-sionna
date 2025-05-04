@@ -2,9 +2,6 @@ import React from 'react'
 import { Device } from '../App'
 import '../styles/Sidebar.css'
 
-// 前端設備類型（簡化版）
-type DeviceType = 'tx' | 'rx' | 'int'
-
 interface SidebarProps {
     devices: Device[]
     loading: boolean
@@ -121,19 +118,25 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         </td>
                                         <td>
                                             <select
-                                                value={device.type}
+                                                value={device.role}
                                                 onChange={(e) =>
                                                     onDeviceChange(
                                                         device.id,
-                                                        'type',
-                                                        e.target
-                                                            .value as DeviceType
+                                                        'role',
+                                                        e.target.value
                                                     )
                                                 }
+                                                className="device-type-select"
                                             >
-                                                <option value="tx">Tx</option>
-                                                <option value="rx">Rx</option>
-                                                <option value="int">Int</option>
+                                                <option value="desired">
+                                                    發射器
+                                                </option>
+                                                <option value="jammer">
+                                                    干擾源
+                                                </option>
+                                                <option value="receiver">
+                                                    接收器
+                                                </option>
                                             </select>
                                         </td>
                                         <td>

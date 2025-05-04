@@ -5,11 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
-from app.db.models import DeviceType, TransmitterType
+from app.db.models import DeviceRole
 from app.schemas.device import Device as DeviceSchema, DeviceCreate, DeviceUpdate
-from app.schemas.interferer import InterfererCreate, InterfererUpdate
 from app.crud import crud_device
-from app.crud.crud_device import update_device_by_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -46,99 +44,29 @@ async def create_new_device(
         )
 
 
-@router.post(
-    "/interferer", status_code=status.HTTP_201_CREATED, response_model=DeviceSchema
-)
-async def create_new_interferer(
-    *,
-    session: AsyncSession = Depends(get_session),
-    interferer_in: InterfererCreate,
-) -> Any:
-    """
-    創建一個新的干擾源設備 (Transmitter with type INTERFERER)。
-    """
-    logger.info(f"API: Received request to create interferer: {interferer_in.name}")
-    # 檢查名稱是否已存在
-    existing_device = await crud_device.get_device_by_name(
-        db=session, name=interferer_in.name
-    )
-    if existing_device:
-        logger.warning(f"Device name '{interferer_in.name}' already exists.")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A device with this name already exists.",
-        )
-    try:
-        created_device = await crud_device.create_interferer(
-            db=session, obj_in=interferer_in
-        )
-        # 確保返回一個有效的 Device 對象
-        interferer_db = await crud_device.get_device(
-            db=session, device_id=created_device.id
-        )
-        if not interferer_db:
-            raise HTTPException(
-                status_code=500, detail="Failed to retrieve interferer after creation."
-            )
-        return DeviceSchema.from_orm(interferer_db)
-    except Exception as e:
-        logger.error(f"API Error creating interferer: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred while creating the interferer: {str(e)}",
-        )
-
-
 @router.get("/", response_model=List[DeviceSchema])
 async def read_devices(
     session: AsyncSession = Depends(get_session),
     skip: int = 0,
     limit: int = 100,
-    device_type: Optional[DeviceType] = Query(
-        None, description="Filter by device type"
-    ),
-    transmitter_type: Optional[TransmitterType] = Query(
-        None, description="Filter by transmitter type (only for TRANSMITTER devices)"
-    ),
+    role: Optional[str] = Query(None, description="Filter by device role"),
 ) -> Any:
     """
-    獲取設備列表，可選按設備類型和發射器類型過濾。
+    獲取設備列表，可選按角色過濾。
     """
     logger.info(
-        f"API: Received request to read devices (skip={skip}, limit={limit}, type={device_type}, tx_type={transmitter_type})"
+        f"API: Received request to read devices (skip={skip}, limit={limit}, role={role})"
     )
 
-    if transmitter_type and (
-        device_type is None or device_type != DeviceType.TRANSMITTER
-    ):
-        # 如果指定了發射器類型但設備類型不是發射器，則設置設備類型為發射器
-        device_type = DeviceType.TRANSMITTER
-        logger.info(
-            f"Setting device_type to TRANSMITTER as transmitter_type was specified"
-        )
-
-    # 根據參數決定使用哪個查詢函數
-    if device_type == DeviceType.TRANSMITTER and transmitter_type:
-        # 特定類型的發射器
-        devices = await crud_device.get_transmitters_by_type(
-            db=session, transmitter_type=transmitter_type, skip=skip, limit=limit
-        )
-    elif transmitter_type == TransmitterType.INTERFERER:
-        # 干擾源 - 使用專門的干擾源查詢
-        devices = await crud_device.get_multi_interferers(
-            db=session, skip=skip, limit=limit
-        )
-    else:
-        # 一般設備查詢
-        devices = await crud_device.get_multi_devices(
-            db=session, skip=skip, limit=limit, device_type=device_type
-        )
+    devices = await crud_device.get_multi_devices(
+        db=session, skip=skip, limit=limit, role=role
+    )
 
     return [DeviceSchema.from_orm(device) for device in devices]
 
 
-@router.get("/interferers", response_model=List[DeviceSchema])
-async def read_interferers(
+@router.get("/jammers", response_model=List[DeviceSchema])
+async def read_jammers(
     session: AsyncSession = Depends(get_session),
     skip: int = 0,
     limit: int = 100,
@@ -146,40 +74,35 @@ async def read_interferers(
     """
     獲取干擾源列表。
     """
-    logger.info(
-        f"API: Received request to read interferers (skip={skip}, limit={limit})"
-    )
-    interferers = await crud_device.get_multi_interferers(
-        db=session, skip=skip, limit=limit
-    )
-    return [DeviceSchema.from_orm(inf) for inf in interferers]
+    logger.info(f"API: Received request to read jammers (skip={skip}, limit={limit})")
+    jammers = await crud_device.get_jammers(db=session, skip=skip, limit=limit)
+    return [DeviceSchema.from_orm(inf) for inf in jammers]
+
+
+@router.get("/receivers", response_model=List[DeviceSchema])
+async def read_receivers(
+    session: AsyncSession = Depends(get_session),
+    skip: int = 0,
+    limit: int = 100,
+) -> Any:
+    """
+    獲取接收器列表。
+    """
+    logger.info(f"API: Received request to read receivers (skip={skip}, limit={limit})")
+    receivers = await crud_device.get_receivers(db=session, skip=skip, limit=limit)
+    return [DeviceSchema.from_orm(inf) for inf in receivers]
 
 
 @router.get("/{device_id}", response_model=DeviceSchema)
 async def read_device_by_id(
     device_id: int,
     session: AsyncSession = Depends(get_session),
-    as_interferer: bool = Query(
-        False, description="Try to get the device as an interferer"
-    ),
 ) -> Any:
     """
     根據 ID 獲取單個設備。
-    如果 as_interferer 為 True 時，會嘗試將設備作為干擾源返回，
-    但如果不是干擾源，則將返回一般設備數據。
     """
-    logger.info(
-        f"API: Received request to read device with ID: {device_id}, as_interferer={as_interferer}"
-    )
+    logger.info(f"API: Received request to read device with ID: {device_id}")
 
-    if as_interferer:
-        # 嘗試作為干擾源獲取
-        device = await crud_device.get_interferer(db=session, interferer_id=device_id)
-        if device:
-            # 如果是干擾源，則使用單獨的端點返回
-            return await read_interferer_by_id(device_id, session)
-
-    # 常規獲取設備
     device = await crud_device.get_device(db=session, device_id=device_id)
     if not device:
         raise HTTPException(
@@ -187,25 +110,6 @@ async def read_device_by_id(
         )
 
     return DeviceSchema.from_orm(device)
-
-
-@router.get("/interferer/{interferer_id}", response_model=DeviceSchema)
-async def read_interferer_by_id(
-    interferer_id: int,
-    session: AsyncSession = Depends(get_session),
-) -> Any:
-    """
-    根據 ID 獲取單個干擾源。
-    """
-    logger.info(f"API: Received request to read interferer with ID: {interferer_id}")
-    interferer = await crud_device.get_interferer(
-        db=session, interferer_id=interferer_id
-    )
-    if not interferer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Interferer not found"
-        )
-    return DeviceSchema.from_orm(interferer)
 
 
 @router.put("/{device_id}", response_model=DeviceSchema)
@@ -216,112 +120,31 @@ async def update_existing_device(
     device_in: DeviceUpdate,
 ) -> Any:
     """
-    更新一個已存在的設備。
+    更新現有設備。
     """
-    logger.info(f"API: Received request to update device ID: {device_id}")
-    # 檢查設備是否存在
-    db_device = await crud_device.get_device(db=session, device_id=device_id)
-    if not db_device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Device not found"
-        )
-
-    # 檢查更新的名稱是否與其他 Device 衝突
-    if device_in.name and device_in.name != db_device.name:
-        existing_device = await crud_device.get_device_by_name(
-            db=session, name=device_in.name
-        )
-        if existing_device and existing_device.id != device_id:
-            logger.warning(
-                f"Updated name '{device_in.name}' conflicts with another device."
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Another device with this updated name already exists.",
-            )
-
-    # 檢查設備類型變更 - 特別處理變更為干擾器的情況
-    is_changing_to_interferer = (
-        device_in.device_type == DeviceType.TRANSMITTER
-        and device_in.transmitter_type == TransmitterType.INTERFERER
-    )
-
+    logger.info(f"API: Received request to update device with ID: {device_id}")
     try:
-        if is_changing_to_interferer:
-            logger.info(f"Converting device ID {device_id} to interferer")
-            # 創建干擾器更新格式
-            interferer_data = InterfererUpdate(
-                name=device_in.name,
-                x=device_in.x,
-                y=device_in.y,
-                z=device_in.z,
-                active=device_in.active,
+        # 嘗試獲取設備
+        device = await crud_device.get_device(db=session, device_id=device_id)
+        if not device:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Device not found"
             )
-            # 使用update_device_by_id而不是update_interferer_by_id，因為後者會檢查設備已經是干擾器
-            updated_device = await crud_device.update_device_by_id(
-                db=session, device_id=device_id, device_in=device_in
-            )
-        else:
-            # 一般設備更新
-            updated_device = await update_device_by_id(
-                db=session, device_id=device_id, device_in=device_in
-            )
+
+        # 更新設備
+        updated_device = await crud_device.update_device_by_id(
+            db=session, device_id=device_id, device_in=device_in
+        )
         return DeviceSchema.from_orm(updated_device)
+    except HTTPException:
+        # 直接重新拋出 HTTPException
+        raise
     except Exception as e:
-        logger.error(f"API Error updating device ID {device_id}: {e}", exc_info=True)
+        # 記錄並包裝其他異常
+        logger.error(f"API Error updating device: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred while updating the device: {str(e)}",
-        )
-
-
-@router.put("/interferer/{interferer_id}", response_model=DeviceSchema)
-async def update_existing_interferer(
-    *,
-    session: AsyncSession = Depends(get_session),
-    interferer_id: int,
-    interferer_in: InterfererUpdate,
-) -> Any:
-    """
-    更新一個已存在的干擾源。
-    """
-    logger.info(f"API: Received request to update interferer ID: {interferer_id}")
-    # 檢查干擾源是否存在
-    db_interferer = await crud_device.get_interferer(
-        db=session, interferer_id=interferer_id
-    )
-    if not db_interferer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Interferer not found"
-        )
-
-    # 檢查更新的名稱是否與其他 Device 衝突
-    if interferer_in.name and interferer_in.name != db_interferer.name:
-        existing_device = await crud_device.get_device_by_name(
-            db=session, name=interferer_in.name
-        )
-        if existing_device and existing_device.id != interferer_id:
-            logger.warning(
-                f"Updated name '{interferer_in.name}' conflicts with another device."
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Another device with this updated name already exists.",
-            )
-
-    try:
-        # 使用新的update_interferer_by_id函數
-        updated_interferer = await crud_device.update_interferer_by_id(
-            db=session, interferer_id=interferer_id, obj_in=interferer_in
-        )
-        return DeviceSchema.from_orm(updated_interferer)
-    except Exception as e:
-        logger.error(
-            f"API Error updating interferer ID {interferer_id}: {e}", exc_info=True
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred while updating the interferer: {str(e)}",
         )
 
 
@@ -334,30 +157,10 @@ async def delete_device_by_id(
     """
     刪除一個設備。
     """
-    logger.info(f"API: Received request to delete device ID: {device_id}")
-    deleted_device = await crud_device.remove_device(db=session, device_id=device_id)
-    if not deleted_device:
+    logger.info(f"API: Received request to delete device with ID: {device_id}")
+    device = await crud_device.remove_device(db=session, device_id=device_id)
+    if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Device not found"
         )
-    return DeviceSchema.from_orm(deleted_device)
-
-
-@router.delete("/interferer/{interferer_id}", response_model=DeviceSchema)
-async def delete_interferer_by_id(
-    *,
-    session: AsyncSession = Depends(get_session),
-    interferer_id: int,
-) -> Any:
-    """
-    刪除一個干擾源。
-    """
-    logger.info(f"API: Received request to delete interferer ID: {interferer_id}")
-    deleted_interferer = await crud_device.remove_interferer(
-        db=session, interferer_id=interferer_id
-    )
-    if not deleted_interferer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Interferer not found"
-        )
-    return DeviceSchema.from_orm(deleted_interferer)
+    return DeviceSchema.from_orm(device)

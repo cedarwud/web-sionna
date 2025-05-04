@@ -21,8 +21,8 @@ import { TextureLoader, RepeatWrapping, SRGBColorSpace } from 'three'
 import { Device } from '../App'
 
 // 靜態檔案路徑
-const SCENE_URL = '/static/models/XIN.glb'
-const UAV_MODEL_URL = '/api/v1/sionna/models/uav1' // 替換為帶動畫的 GLB 模型路徑
+const SCENE_URL = '/static/models/NYCU.glb'
+const UAV_MODEL_URL = '/api/v1/sionna/models/uav' // 替換為帶動畫的 GLB 模型路徑
 const BS_MODEL_URL = '/api/v1/sionna/models/tx' // BS 模型路徑
 const JAMMER_MODEL_URL = '/api/v1/sionna/models/jammer' // Jammer 模型路徑
 
@@ -745,7 +745,7 @@ function Etoile({ devices = [] }: EtoileProps) {
 
     const deviceMeshes = useMemo(() => {
         return devices.map((device) => {
-            if (device.name.startsWith('rx-')) {
+            if (device.role === 'receiver') {
                 return (
                     <AnimatedUAV
                         key={device.id}
@@ -753,7 +753,7 @@ function Etoile({ devices = [] }: EtoileProps) {
                         scale={[UAV_SCALE, UAV_SCALE, UAV_SCALE]}
                     />
                 )
-            } else if (device.name.startsWith('tx-')) {
+            } else if (device.role === 'desired') {
                 return (
                     <StaticModel
                         key={device.id}
@@ -762,7 +762,7 @@ function Etoile({ devices = [] }: EtoileProps) {
                         scale={[1, 1, 1]}
                     />
                 )
-            } else if (device.name.startsWith('int-')) {
+            } else if (device.role === 'jammer') {
                 return (
                     <StaticModel
                         key={device.id}
