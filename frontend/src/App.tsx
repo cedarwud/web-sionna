@@ -75,7 +75,7 @@ function App() {
         'disconnected' | 'connected' | 'error'
     >('disconnected')
     const [hasTempDevices, setHasTempDevices] = useState<boolean>(false)
-    const [activeComponent, setActiveComponent] = useState<string>('3DRT')
+    const [activeComponent, setActiveComponent] = useState<string>('2DRT')
     const [auto, setAuto] = useState(false)
     const [manualDirection, setManualDirection] = useState<
         | 'up'
