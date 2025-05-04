@@ -15,7 +15,7 @@ import {
     useAnimations,
 } from '@react-three/drei'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import * as THREE from 'three'
 import { TextureLoader, RepeatWrapping, SRGBColorSpace } from 'three'
 import { Device } from '../App'
@@ -48,6 +48,38 @@ const RADIATION_MATERIAL = new THREE.MeshBasicMaterial({
 
 interface EtoileProps {
     devices: Device[]
+    auto: boolean
+    manualControl?: (
+        direction:
+            | 'up'
+            | 'down'
+            | 'left'
+            | 'right'
+            | 'ascend'
+            | 'descend'
+            | 'left-up'
+            | 'right-up'
+            | 'left-down'
+            | 'right-down'
+            | 'rotate-left'
+            | 'rotate-right'
+            | null
+    ) => void
+    manualDirection?:
+        | 'up'
+        | 'down'
+        | 'left'
+        | 'right'
+        | 'ascend'
+        | 'descend'
+        | 'left-up'
+        | 'right-up'
+        | 'left-down'
+        | 'right-down'
+        | 'rotate-left'
+        | 'rotate-right'
+        | null
+    onUAVPositionUpdate?: (position: [number, number, number]) => void
 }
 
 interface Point {
@@ -68,24 +100,73 @@ interface RayPathData {
 function AnimatedUAV({
     position,
     scale,
+    auto,
+    manualDirection,
+    onManualMoveDone,
+    onPositionUpdate,
 }: {
     position: [number, number, number]
     scale: [number, number, number]
+    auto: boolean
+    manualDirection?:
+        | 'up'
+        | 'down'
+        | 'left'
+        | 'right'
+        | 'ascend'
+        | 'descend'
+        | 'left-up'
+        | 'right-up'
+        | 'left-down'
+        | 'right-down'
+        | 'rotate-left'
+        | 'rotate-right'
+        | null
+    onManualMoveDone?: () => void
+    onPositionUpdate?: (position: [number, number, number]) => void
 }) {
     const group = useRef<THREE.Group>(null)
     const lightRef = useRef<THREE.PointLight>(null)
-    const { scene, animations } = useGLTF(UAV_MODEL_URL) as GLTF
+    const { scene, animations } = useGLTF(UAV_MODEL_URL) as any
     const { actions } = useAnimations(animations, group)
+    const lastUpdateTimeRef = useRef<number>(0)
+    const throttleInterval = 100
 
-    // 儲存初始位置和目標位置
+    // Use state for current position, initialized from prop
+    const [currentPosition, setCurrentPosition] = useState<THREE.Vector3>(
+        new THREE.Vector3(...position)
+    )
+
+    // Effect to sync internal state with position prop changes (from Sidebar edits)
+    useEffect(() => {
+        // Check if the prop position is significantly different from the current state
+        // to avoid loops if the prop updates due to throttled state updates from this component
+        const propVec = new THREE.Vector3(...position)
+        if (currentPosition.distanceToSquared(propVec) > 0.01) {
+            // Use a small threshold
+            console.log(
+                'Sidebar position prop changed, updating UAV internal state:',
+                position
+            )
+            setCurrentPosition(propVec)
+            // Reset velocity and waypoints if needed when position is forced externally?
+            // velocity.current.set(0, 0, 0);
+            // setWaypoints([]); // Or regenerate path?
+            // currentWaypoint.current = 0;
+        }
+    }, [position]) // Depend only on the position prop
+
+    // Storing initial position from props might still be useful for auto flight logic
     const initialPosition = useRef<THREE.Vector3>(
         new THREE.Vector3(...position)
     )
+    // Update initialPosition ref if the position prop fundamentally changes
+    useEffect(() => {
+        initialPosition.current.set(...position)
+    }, [position])
+
     const [targetPosition, setTargetPosition] = useState<THREE.Vector3>(
-        new THREE.Vector3(...position)
-    )
-    const [currentPosition, setCurrentPosition] = useState<THREE.Vector3>(
-        new THREE.Vector3(...position)
+        new THREE.Vector3(...position) // Initialize target with initial prop position
     )
     const moveSpeed = useRef(0.5) // 移動速度控制
     const lastDirection = useRef(new THREE.Vector3(0, 0, 0)) // 保存上一幀的方向向量
@@ -99,7 +180,7 @@ function AnimatedUAV({
     const flightModes = ['cruise', 'hover', 'agile', 'explore'] as const
     type FlightMode = (typeof flightModes)[number]
     const [flightMode, setFlightMode] = useState<FlightMode>('cruise')
-    const flightModeTimer = useRef<NodeJS.Timeout | null>(null)
+    const flightModeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const flightModeParams = useRef({
         cruise: {
             pathCurvature: 0.2,
@@ -369,10 +450,21 @@ function AnimatedUAV({
 
     // 處理UAV的移動
     useFrame((state, delta) => {
+        // Always update visual position based on state, regardless of auto mode
+        if (group.current) {
+            group.current.position.copy(currentPosition)
+        }
+        // Update light position relative to UAV
+        if (lightRef.current) {
+            lightRef.current.position.set(0, 5, 0) // 相對於UAV的位置
+        }
+
+        // Only run auto-flight logic if auto is true
+        if (!auto) return
         if (!group.current || !lightRef.current || waypoints.length === 0)
             return
 
-        const current = currentPosition.clone()
+        const current = currentPosition.clone() // Use state as the source of truth
         const modeParams = flightModeParams.current[flightMode]
 
         // 確定當前目標路徑點
@@ -482,74 +574,89 @@ function AnimatedUAV({
         // 更新組件位置
         group.current.position.set(newPosition.x, newPosition.y, newPosition.z)
 
-        // 更新光源位置，跟著UAV移動
-        lightRef.current.position.set(0, 5, 0) // 相對於UAV的位置
-
-        // 使UAV朝向移動方向，但更平滑
-        if (velocity.current.length() > 0.01) {
-            // 計算向前的向量作為"前進"方向
-            const forward = velocity.current.clone().normalize()
-
-            // 計算向上的向量，在轉彎時傾斜
-            const up = new THREE.Vector3(0, 1, 0)
-
-            // 計算右向量
-            const right = new THREE.Vector3()
-                .crossVectors(forward, up)
-                .normalize()
-
-            // 根據轉向角度和飛行速度添加傾斜效果
-            const turnRate = 1 - forward.dot(lastDirection.current) // 轉彎率
-            const speedFactor = Math.min(
-                1,
-                velocity.current.length() / maxSpeed.current
-            )
-            const bankAngle = Math.min(0.5, turnRate * 3 * speedFactor) // 最大傾斜50度
-
-            // 應用傾斜 - 向右轉時向左傾斜，向左轉時向右傾斜
-            const turnDirection = Math.sign(right.dot(rawDirection))
-            const bankVector = right
-                .clone()
-                .multiplyScalar(-turnDirection * bankAngle)
-
-            // 添加俯仰角 - 上升時機頭上仰，下降時機頭下垂
-            const pitchAngle = Math.min(0.3, Math.max(-0.3, forward.y * 0.8))
-            const pitchVector = right
-                .clone()
-                .cross(forward)
-                .multiplyScalar(pitchAngle)
-
-            // 結合向上向量、傾斜向量和俯仰向量
-            const adjustedUp = up
-                .clone()
-                .add(bankVector)
-                .add(pitchVector)
-                .normalize()
-
-            // 構建旋轉矩陣
-            const lookMatrix = new THREE.Matrix4().lookAt(
-                new THREE.Vector3(0, 0, 0),
-                forward,
-                adjustedUp
-            )
-
-            // 從矩陣提取四元數
-            const targetRot = new THREE.Quaternion().setFromRotationMatrix(
-                lookMatrix
-            )
-
-            // 平滑插值旋轉，根據飛行模式調整靈敏度
-            const currentRot = group.current.quaternion.clone()
-            const rotationSpeed = 0.05 + (1 - modeParams.smoothingFactor) * 0.15
-            currentRot.slerp(targetRot, rotationSpeed)
-
-            // 應用旋轉
-            group.current.quaternion.copy(currentRot)
-        }
-
         // 更新當前位置
         setCurrentPosition(newPosition)
+
+        // Throttled update for parent component
+        const now = performance.now()
+        if (now - lastUpdateTimeRef.current > throttleInterval) {
+            onPositionUpdate?.([newPosition.x, newPosition.y, newPosition.z])
+            lastUpdateTimeRef.current = now
+        }
     })
+
+    // 新增 effect 處理手動移動
+    useEffect(() => {
+        if (!auto && manualDirection) {
+            let finalPosition: [number, number, number] | null = null
+            setCurrentPosition((prev) => {
+                const next = prev.clone()
+                switch (manualDirection) {
+                    case 'up':
+                        next.y += 1
+                        break
+                    case 'down':
+                        next.y -= 1
+                        break
+                    case 'left':
+                        next.x -= 1
+                        break
+                    case 'right':
+                        next.x += 1
+                        break
+                    case 'ascend':
+                        next.z += 1
+                        break
+                    case 'descend':
+                        next.z -= 1
+                        break
+                    case 'left-up':
+                        next.x -= 1
+                        next.z -= 1
+                        break
+                    case 'right-up':
+                        next.x += 1
+                        next.z -= 1
+                        break
+                    case 'left-down':
+                        next.x -= 1
+                        next.z += 1
+                        break
+                    case 'right-down':
+                        next.x += 1
+                        next.z += 1
+                        break
+                    case 'rotate-left':
+                        if (group.current) {
+                            group.current.rotation.y += 0.087 // 約 5 度
+                        }
+                        break
+                    case 'rotate-right':
+                        if (group.current) {
+                            group.current.rotation.y -= 0.087 // 約 5 度
+                        }
+                        break
+                }
+                finalPosition = [next.x, next.y, next.z]
+                return next
+            })
+            if (onManualMoveDone) onManualMoveDone()
+            if (finalPosition) {
+                // Throttled update for parent component (manual mode)
+                const now = performance.now()
+                if (now - lastUpdateTimeRef.current > throttleInterval) {
+                    onPositionUpdate?.(finalPosition)
+                    lastUpdateTimeRef.current = now
+                }
+            }
+        }
+    }, [
+        manualDirection,
+        auto,
+        onManualMoveDone,
+        onPositionUpdate,
+        throttleInterval,
+    ])
 
     // 調試：輸出模型載入信息
     useEffect(() => {
@@ -610,7 +717,7 @@ function StaticModel({
     position: [number, number, number]
     scale: [number, number, number]
 }) {
-    const { scene } = useGLTF(url) as GLTF
+    const { scene } = useGLTF(url) as any
 
     // 創建一個深度克隆的新實例，避免共享同一個模型實例
     const clonedScene = useMemo(() => {
@@ -653,10 +760,17 @@ function StaticModel({
     )
 }
 
-function Etoile({ devices = [] }: EtoileProps) {
-    const { scene: mainScene } = useGLTF(SCENE_URL) as GLTF
+function Etoile({
+    devices = [],
+    auto,
+    manualControl,
+    manualDirection,
+    onUAVPositionUpdate,
+}: EtoileProps) {
+    const { scene: mainScene } = useGLTF(SCENE_URL) as any
     const { controls } = useThree()
     const [rays, setRays] = useState<THREE.Object3D[]>([])
+    const [pendingManual, setPendingManual] = useState<string | null>(null)
 
     useLayoutEffect(() => {
         ;(controls as OrbitControlsImpl)?.target?.set(0, 0, 0)
@@ -751,6 +865,12 @@ function Etoile({ devices = [] }: EtoileProps) {
                             device.position_y,
                         ]}
                         scale={[UAV_SCALE, UAV_SCALE, UAV_SCALE]}
+                        auto={auto}
+                        manualDirection={manualDirection}
+                        onManualMoveDone={() =>
+                            manualControl && manualControl(null)
+                        }
+                        onPositionUpdate={onUAVPositionUpdate}
                     />
                 )
             } else if (device.role === 'desired') {
@@ -783,7 +903,7 @@ function Etoile({ devices = [] }: EtoileProps) {
                 return null
             }
         })
-    }, [devices])
+    }, [devices, auto, manualDirection, onUAVPositionUpdate])
 
     return (
         <Bounds>
@@ -796,9 +916,47 @@ function Etoile({ devices = [] }: EtoileProps) {
 
 interface SceneViewProps {
     devices: Device[]
+    auto: boolean
+    manualDirection?:
+        | 'up'
+        | 'down'
+        | 'left'
+        | 'right'
+        | 'ascend'
+        | 'descend'
+        | 'left-up'
+        | 'right-up'
+        | 'left-down'
+        | 'right-down'
+        | 'rotate-left'
+        | 'rotate-right'
+        | null
+    onManualControl?: (
+        direction:
+            | 'up'
+            | 'down'
+            | 'left'
+            | 'right'
+            | 'ascend'
+            | 'descend'
+            | 'left-up'
+            | 'right-up'
+            | 'left-down'
+            | 'right-down'
+            | 'rotate-left'
+            | 'rotate-right'
+            | null
+    ) => void
+    onUAVPositionUpdate?: (position: [number, number, number]) => void
 }
 
-export default function SceneView({ devices = [] }: SceneViewProps) {
+export default function SceneView({
+    devices = [],
+    auto,
+    manualDirection,
+    onManualControl,
+    onUAVPositionUpdate,
+}: SceneViewProps) {
     return (
         <div
             className="scene-container"
@@ -831,7 +989,13 @@ export default function SceneView({ devices = [] }: SceneViewProps) {
                     shadow-radius={8}
                 />
                 <Suspense fallback={null}>
-                    <Etoile devices={devices} />
+                    <Etoile
+                        devices={devices}
+                        auto={auto}
+                        manualDirection={manualDirection}
+                        manualControl={onManualControl}
+                        onUAVPositionUpdate={onUAVPositionUpdate}
+                    />
                     <ContactShadows
                         position={[0, 0.1, 0]}
                         opacity={0.4}

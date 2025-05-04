@@ -75,7 +75,26 @@ function App() {
         'disconnected' | 'connected' | 'error'
     >('disconnected')
     const [hasTempDevices, setHasTempDevices] = useState<boolean>(false)
-    const [activeComponent, setActiveComponent] = useState<string>('2DRT')
+    const [activeComponent, setActiveComponent] = useState<string>('3DRT')
+    const [auto, setAuto] = useState(false)
+    const [manualDirection, setManualDirection] = useState<
+        | 'up'
+        | 'down'
+        | 'left'
+        | 'right'
+        | 'ascend'
+        | 'descend'
+        | 'left-up'
+        | 'right-up'
+        | 'left-down'
+        | 'right-down'
+        | 'rotate-left'
+        | 'rotate-right'
+        | null
+    >(null)
+    const [uavPosition, setUavPosition] = useState<
+        [number, number, number] | null
+    >(null)
 
     // 從API獲取設備數據
     const fetchDevices = useCallback(async () => {
@@ -188,9 +207,9 @@ function App() {
 
                 const backendData = {
                     name: device.name,
-                    position_x: device.position_x,
-                    position_y: device.position_y,
-                    position_z: device.position_z,
+                    position_x: Math.round(device.position_x),
+                    position_y: Math.round(device.position_y),
+                    position_z: Math.round(device.position_z),
                     orientation_x: device.orientation_x,
                     orientation_y: device.orientation_y,
                     orientation_z: device.orientation_z,
@@ -241,9 +260,9 @@ function App() {
             for (const device of devicesToUpdate) {
                 const backendData = {
                     name: device.name,
-                    position_x: device.position_x,
-                    position_y: device.position_y,
-                    position_z: device.position_z,
+                    position_x: Math.round(device.position_x),
+                    position_y: Math.round(device.position_y),
+                    position_z: Math.round(device.position_z),
                     orientation_x: device.orientation_x,
                     orientation_y: device.orientation_y,
                     orientation_z: device.orientation_z,
@@ -531,6 +550,68 @@ function App() {
         setActiveComponent(component)
     }
 
+    // 處理手動控制 UAV 方向
+    const handleManualControl = (
+        direction:
+            | 'up'
+            | 'down'
+            | 'left'
+            | 'right'
+            | 'ascend'
+            | 'descend'
+            | 'left-up'
+            | 'right-up'
+            | 'left-down'
+            | 'right-down'
+            | 'rotate-left'
+            | 'rotate-right'
+            | null
+    ) => {
+        setManualDirection(direction)
+    }
+
+    // 處理 UAV 位置更新
+    const handleUAVPositionUpdate = (pos: [number, number, number]) => {
+        setUavPosition(pos)
+    }
+
+    // 當 UAV 位置更新時，同步更新 Sidebar 中的 receiver 設備座標
+    useEffect(() => {
+        if (uavPosition) {
+            let needsUpdate = false
+            const updatedDevices = tempDevices.map((device) => {
+                if (device.role === 'receiver') {
+                    // 座標轉換：Sidebar X = UAV X, Sidebar Y = UAV Z, Sidebar Z = UAV Y
+                    const newX = parseFloat(uavPosition[0].toFixed(2))
+                    const newY = parseFloat(uavPosition[2].toFixed(2))
+                    const newZ = parseFloat(uavPosition[1].toFixed(2))
+
+                    // 檢查座標是否有實際變化
+                    if (
+                        device.position_x !== newX ||
+                        device.position_y !== newY ||
+                        device.position_z !== newZ
+                    ) {
+                        needsUpdate = true
+                        return {
+                            ...device,
+                            position_x: newX, // UAV X
+                            position_y: newY, // UAV Z
+                            position_z: newZ, // UAV Y
+                        }
+                    }
+                }
+                return device
+            })
+
+            // 只有在座標實際變化時才更新狀態
+            if (needsUpdate) {
+                setTempDevices(updatedDevices)
+                setHasTempDevices(true)
+            }
+        }
+    }, [uavPosition, tempDevices])
+
     // 渲染當前選中的組件
     const renderActiveComponent = () => {
         switch (activeComponent) {
@@ -542,7 +623,15 @@ function App() {
                     />
                 )
             case '3DRT':
-                return <SceneView devices={tempDevices} />
+                return (
+                    <SceneView
+                        devices={tempDevices}
+                        auto={auto}
+                        manualDirection={manualDirection}
+                        onManualControl={handleManualControl}
+                        onUAVPositionUpdate={handleUAVPositionUpdate}
+                    />
+                )
             case 'constellation':
                 return <ConstellationViewer />
             default:
@@ -577,8 +666,11 @@ function App() {
                             onCancel={handleCancel}
                             loading={loading}
                             apiStatus={apiStatus}
-                            onRefresh={refreshDeviceData}
                             hasTempDevices={hasTempDevices}
+                            auto={auto}
+                            onAutoChange={setAuto}
+                            onManualControl={handleManualControl}
+                            activeComponent={activeComponent}
                         />
                     }
                     content={renderActiveComponent()}
