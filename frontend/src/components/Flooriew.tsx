@@ -41,9 +41,9 @@ const FALLBACK_IMAGE_PATH = '/rendered_images/scene_with_devices.png'
 
 // 添加座標轉換常量 - 統一管理座標轉換參數
 const COORDINATE_TRANSFORM = {
-    offsetX: 436, // X轴偏移量
-    offsetY: 398, // Y轴偏移量
-    scale: 1.45, // 比例因子
+    offsetX: 579, // X轴偏移量
+    offsetY: 511, // Y轴偏移量
+    scale: 1.2, // 比例因子
 }
 
 // 使用 React.memo 包裝組件以避免不必要的重新渲染

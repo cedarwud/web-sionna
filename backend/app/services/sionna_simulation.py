@@ -253,9 +253,9 @@ def _setup_pyrender_scene_from_glb() -> Optional[pyrender.Scene]:
         camera = pyrender.PerspectiveCamera(yfov=np.pi / 4.0, znear=0.1, zfar=10000.0)
         cam_pose = np.array(
             [
-                [1.0, 0.0, 0.0, -25.0],
-                [0.0, 0.0, 1.0, 700.0],
-                [0.0, -1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 17.0],
+                [0.0, 0.0, 1.0, 1020.0],
+                [0.0, -1.0, 0.0, -25.0],
                 [0.0, 0.0, 0.0, 1.0],
             ]
         )
@@ -274,8 +274,8 @@ def _render_crop_and_save(
     pr_scene: pyrender.Scene,
     output_path: str,
     bg_color_float: List[float] = SCENE_BACKGROUND_COLOR_RGB,
-    render_width: int = 800,
-    render_height: int = 800,
+    render_width: int = 1200,
+    render_height: int = 960,
     padding_y: int = 0,  # Default vertical padding
     padding_x: int = 0,  # Default horizontal padding
 ) -> bool:
@@ -413,51 +413,133 @@ async def generate_scene_with_paths_image(
 
         # --- 4. Overlay Devices --- (Keep)
         logger.info("Overlaying devices onto pyrender scene...")
-        DEVICE_SIZE = 5.0
+        # Define cone dimensions and rotation for downward pointing
+        CONE_RADIUS = 7.0  # Slightly Reduced
+        CONE_HEIGHT = 22.0  # Slightly Reduced
+        # Rotate cone model (-90 deg around X) to align Trimesh +Z with Pyrender -Y (down)
+        down_rotation_matrix = trimesh.transformations.rotation_matrix(
+            -np.pi / 2, [1, 0, 0]
+        )
+        # Additional tilt (e.g., 45 degrees around X-axis)
+        tilt_angle_rad = np.radians(45)  # Increased tilt
+        tilt_rotation_matrix = trimesh.transformations.rotation_matrix(
+            tilt_angle_rad, [1, 0, 0]
+        )
+
+        # New Colors with better contrast
         TX_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[0.0, 0.0, 1.0, 1.0]
+            baseColorFactor=[1.0, 1.0, 0.0, 1.0]  # Bright Yellow (Keep)
         )
         RX_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[1.0, 0.0, 0.0, 1.0]
+            baseColorFactor=[1.0, 0.27, 0.0, 1.0]  # Orange-Red
         )
         INT_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[0.0, 0.0, 0.0, 1.0]
+            baseColorFactor=[0.0, 0.0, 1.0, 1.0]  # Pure Blue
         )
-        # Add device spheres to pr_scene...
+        # White material for outline
+        WHITE_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[1.0, 1.0, 1.0, 1.0]  # White
+        )
+
+        # Outline disk dimensions
+        OUTLINE_RADIUS = CONE_RADIUS + 1.0  # Slightly larger radius
+        OUTLINE_HEIGHT = 0.5  # Very thin
+
+        # Add transmitters to scene
         for tx_data in transmitters_data:
             if tx_data.position_list:
                 pos = tx_data.position_list
-                render_pos = [pos[0], pos[2] + DEVICE_SIZE, pos[1]]
                 mat = (
                     INT_MATERIAL_PYRENDER
                     if tx_data.transmitter_role == DeviceRole.JAMMER
                     else TX_MATERIAL_PYRENDER
                 )
                 try:
-                    sphere = trimesh.primitives.Sphere(radius=DEVICE_SIZE)
-                    device_mesh = pyrender.Mesh.from_trimesh(sphere, material=mat)
-                    pose_matrix = np.eye(4)
-                    pose_matrix[:3, 3] = render_pos
-                    pr_scene.add(device_mesh, pose=pose_matrix)
+                    # Create colored cone
+                    cone = trimesh.creation.cone(radius=CONE_RADIUS, height=CONE_HEIGHT)
+                    device_mesh = pyrender.Mesh.from_trimesh(cone, material=mat)
+                    # Create white outline disk (cylinder)
+                    outline_disk = trimesh.creation.cylinder(
+                        radius=OUTLINE_RADIUS, height=OUTLINE_HEIGHT
+                    )
+                    outline_mesh = pyrender.Mesh.from_trimesh(
+                        outline_disk, material=WHITE_MATERIAL_PYRENDER
+                    )
+
+                    # Pose for cone (tip at ground, pointing down)
+                    translation_matrix = trimesh.transformations.translation_matrix(
+                        [pos[0], pos[2], pos[1]]
+                    )  # Tip at ground Z=pos[2]
+                    # Only apply down rotation, no tilt
+                    cone_pose_matrix = translation_matrix @ down_rotation_matrix
+
+                    # Pose for outline disk (centered at cone base, slightly below)
+                    outline_center_z = (
+                        pos[2] - OUTLINE_HEIGHT / 2 - 0.1
+                    )  # Place slightly below cone tip
+                    outline_translation_matrix = (
+                        trimesh.transformations.translation_matrix(
+                            [pos[0], outline_center_z, pos[1]]
+                        )
+                    )
+                    outline_pose_matrix = outline_translation_matrix
+
+                    # Add outline first, then cone
+                    pr_scene.add(outline_mesh, pose=outline_pose_matrix)
+                    pr_scene.add(device_mesh, pose=cone_pose_matrix)
+
+                    logger.info(
+                        f"Added TX Cone '{tx_data.device_model.name}' with outline to scene"
+                    )
                 except Exception as dev_err:
                     logger.error(
-                        f"Failed adding TX '{tx_data.device_model.name}': {dev_err}",
+                        f"Failed adding TX Cone '{tx_data.device_model.name}' to scene: {dev_err}",
                         exc_info=True,
                     )
         for rx_data in receivers_data:
             if rx_data.position_list:
                 pos = rx_data.position_list
-                render_pos = [pos[0], pos[2] + DEVICE_SIZE, pos[1]]
                 mat = RX_MATERIAL_PYRENDER
                 try:
-                    sphere = trimesh.primitives.Sphere(radius=DEVICE_SIZE)
-                    device_mesh = pyrender.Mesh.from_trimesh(sphere, material=mat)
-                    pose_matrix = np.eye(4)
-                    pose_matrix[:3, 3] = render_pos
-                    pr_scene.add(device_mesh, pose=pose_matrix)
+                    # Create colored cone
+                    cone = trimesh.creation.cone(radius=CONE_RADIUS, height=CONE_HEIGHT)
+                    device_mesh = pyrender.Mesh.from_trimesh(cone, material=mat)
+                    # Create white outline disk (cylinder)
+                    outline_disk = trimesh.creation.cylinder(
+                        radius=OUTLINE_RADIUS, height=OUTLINE_HEIGHT
+                    )
+                    outline_mesh = pyrender.Mesh.from_trimesh(
+                        outline_disk, material=WHITE_MATERIAL_PYRENDER
+                    )
+
+                    # Pose for cone (tip at ground, pointing down)
+                    translation_matrix = trimesh.transformations.translation_matrix(
+                        [pos[0], pos[2], pos[1]]
+                    )  # Tip at ground Z=pos[2]
+                    # Only apply down rotation, no tilt
+                    cone_pose_matrix = translation_matrix @ down_rotation_matrix
+
+                    # Pose for outline disk (centered at cone base, slightly below)
+                    outline_center_z = (
+                        pos[2] - OUTLINE_HEIGHT / 2 - 0.1
+                    )  # Place slightly below cone tip
+                    outline_translation_matrix = (
+                        trimesh.transformations.translation_matrix(
+                            [pos[0], outline_center_z, pos[1]]
+                        )
+                    )
+                    outline_pose_matrix = outline_translation_matrix
+
+                    # Add outline first, then cone
+                    pr_scene.add(outline_mesh, pose=outline_pose_matrix)
+                    pr_scene.add(device_mesh, pose=cone_pose_matrix)
+
+                    logger.info(
+                        f"Added RX Cone '{rx_data.device_model.name}' with outline to scene"
+                    )
                 except Exception as dev_err:
                     logger.error(
-                        f"Failed adding RX '{rx_data.device_model.name}': {dev_err}",
+                        f"Failed adding RX Cone '{rx_data.device_model.name}' to scene: {dev_err}",
                         exc_info=True,
                     )
         logger.info("Devices overlay complete.")
@@ -851,37 +933,87 @@ async def generate_scene_with_devices_image(
 
         # --- 3. Overlay Devices ---
         logger.info("Overlaying devices onto pyrender scene...")
-        DEVICE_SIZE = 5.0
+        # Define cone dimensions and rotation for downward pointing
+        CONE_RADIUS = 7.0  # Slightly Reduced
+        CONE_HEIGHT = 22.0  # Slightly Reduced
+        # Rotate cone model (-90 deg around X) to align Trimesh +Z with Pyrender -Y (down)
+        down_rotation_matrix = trimesh.transformations.rotation_matrix(
+            -np.pi / 2, [1, 0, 0]
+        )
+        # Additional tilt (e.g., 45 degrees around X-axis)
+        tilt_angle_rad = np.radians(45)  # Increased tilt
+        tilt_rotation_matrix = trimesh.transformations.rotation_matrix(
+            tilt_angle_rad, [1, 0, 0]
+        )
+
+        # New Colors with better contrast
         TX_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[0.0, 0.0, 1.0, 1.0]
+            baseColorFactor=[1.0, 1.0, 0.0, 1.0]  # Bright Yellow (Keep)
         )
         RX_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[1.0, 0.0, 0.0, 1.0]
+            baseColorFactor=[1.0, 0.27, 0.0, 1.0]  # Orange-Red
         )
         INT_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[0.0, 0.0, 0.0, 1.0]
+            baseColorFactor=[0.0, 0.0, 1.0, 1.0]  # Pure Blue
         )
+        # White material for outline
+        WHITE_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[1.0, 1.0, 1.0, 1.0]  # White
+        )
+
+        # Outline disk dimensions
+        OUTLINE_RADIUS = CONE_RADIUS + 1.0  # Slightly larger radius
+        OUTLINE_HEIGHT = 0.5  # Very thin
 
         # Add transmitters to scene
         for tx_data in transmitters_data:
             if tx_data.position_list:
                 pos = tx_data.position_list
-                render_pos = [pos[0], pos[2] + DEVICE_SIZE, pos[1]]
                 mat = (
                     INT_MATERIAL_PYRENDER
                     if tx_data.transmitter_role == DeviceRole.JAMMER
                     else TX_MATERIAL_PYRENDER
                 )
                 try:
-                    sphere = trimesh.primitives.Sphere(radius=DEVICE_SIZE)
-                    device_mesh = pyrender.Mesh.from_trimesh(sphere, material=mat)
-                    pose_matrix = np.eye(4)
-                    pose_matrix[:3, 3] = render_pos
-                    pr_scene.add(device_mesh, pose=pose_matrix)
-                    logger.info(f"Added TX '{tx_data.device_model.name}' to scene")
+                    # Create colored cone
+                    cone = trimesh.creation.cone(radius=CONE_RADIUS, height=CONE_HEIGHT)
+                    device_mesh = pyrender.Mesh.from_trimesh(cone, material=mat)
+                    # Create white outline disk (cylinder)
+                    outline_disk = trimesh.creation.cylinder(
+                        radius=OUTLINE_RADIUS, height=OUTLINE_HEIGHT
+                    )
+                    outline_mesh = pyrender.Mesh.from_trimesh(
+                        outline_disk, material=WHITE_MATERIAL_PYRENDER
+                    )
+
+                    # Pose for cone (tip at ground, pointing down)
+                    translation_matrix = trimesh.transformations.translation_matrix(
+                        [pos[0], pos[2], pos[1]]
+                    )  # Tip at ground Z=pos[2]
+                    # Only apply down rotation, no tilt
+                    cone_pose_matrix = translation_matrix @ down_rotation_matrix
+
+                    # Pose for outline disk (centered at cone base, slightly below)
+                    outline_center_z = (
+                        pos[2] - OUTLINE_HEIGHT / 2 - 0.1
+                    )  # Place slightly below cone tip
+                    outline_translation_matrix = (
+                        trimesh.transformations.translation_matrix(
+                            [pos[0], outline_center_z, pos[1]]
+                        )
+                    )
+                    outline_pose_matrix = outline_translation_matrix
+
+                    # Add outline first, then cone
+                    pr_scene.add(outline_mesh, pose=outline_pose_matrix)
+                    pr_scene.add(device_mesh, pose=cone_pose_matrix)
+
+                    logger.info(
+                        f"Added TX Cone '{tx_data.device_model.name}' with outline to scene"
+                    )
                 except Exception as dev_err:
                     logger.error(
-                        f"Failed adding TX '{tx_data.device_model.name}': {dev_err}",
+                        f"Failed adding TX Cone '{tx_data.device_model.name}' to scene: {dev_err}",
                         exc_info=True,
                     )
 
@@ -889,18 +1021,47 @@ async def generate_scene_with_devices_image(
         for rx_data in receivers_data:
             if rx_data.position_list:
                 pos = rx_data.position_list
-                render_pos = [pos[0], pos[2] + DEVICE_SIZE, pos[1]]
                 mat = RX_MATERIAL_PYRENDER
                 try:
-                    sphere = trimesh.primitives.Sphere(radius=DEVICE_SIZE)
-                    device_mesh = pyrender.Mesh.from_trimesh(sphere, material=mat)
-                    pose_matrix = np.eye(4)
-                    pose_matrix[:3, 3] = render_pos
-                    pr_scene.add(device_mesh, pose=pose_matrix)
-                    logger.info(f"Added RX '{rx_data.device_model.name}' to scene")
+                    # Create colored cone
+                    cone = trimesh.creation.cone(radius=CONE_RADIUS, height=CONE_HEIGHT)
+                    device_mesh = pyrender.Mesh.from_trimesh(cone, material=mat)
+                    # Create white outline disk (cylinder)
+                    outline_disk = trimesh.creation.cylinder(
+                        radius=OUTLINE_RADIUS, height=OUTLINE_HEIGHT
+                    )
+                    outline_mesh = pyrender.Mesh.from_trimesh(
+                        outline_disk, material=WHITE_MATERIAL_PYRENDER
+                    )
+
+                    # Pose for cone (tip at ground, pointing down)
+                    translation_matrix = trimesh.transformations.translation_matrix(
+                        [pos[0], pos[2], pos[1]]
+                    )  # Tip at ground Z=pos[2]
+                    # Only apply down rotation, no tilt
+                    cone_pose_matrix = translation_matrix @ down_rotation_matrix
+
+                    # Pose for outline disk (centered at cone base, slightly below)
+                    outline_center_z = (
+                        pos[2] - OUTLINE_HEIGHT / 2 - 0.1
+                    )  # Place slightly below cone tip
+                    outline_translation_matrix = (
+                        trimesh.transformations.translation_matrix(
+                            [pos[0], outline_center_z, pos[1]]
+                        )
+                    )
+                    outline_pose_matrix = outline_translation_matrix
+
+                    # Add outline first, then cone
+                    pr_scene.add(outline_mesh, pose=outline_pose_matrix)
+                    pr_scene.add(device_mesh, pose=cone_pose_matrix)
+
+                    logger.info(
+                        f"Added RX Cone '{rx_data.device_model.name}' with outline to scene"
+                    )
                 except Exception as dev_err:
                     logger.error(
-                        f"Failed adding RX '{rx_data.device_model.name}': {dev_err}",
+                        f"Failed adding RX Cone '{rx_data.device_model.name}' to scene: {dev_err}",
                         exc_info=True,
                     )
 

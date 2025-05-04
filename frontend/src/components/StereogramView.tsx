@@ -29,7 +29,7 @@ const JAMMER_MODEL_URL = '/api/v1/sionna/models/jammer' // Jammer 模型路徑
 // 材質和尺寸定義
 const DEVICE_SIZE = 5
 const UAV_SCALE = 10
-const UAV_Y_OFFSET = 10
+const UAV_Y_OFFSET = 1
 
 const RAY_MATERIAL = new THREE.LineBasicMaterial({
     color: 0xffaa00,
@@ -136,25 +136,6 @@ function AnimatedUAV({
     const [currentPosition, setCurrentPosition] = useState<THREE.Vector3>(
         new THREE.Vector3(...position)
     )
-
-    // Effect to sync internal state with position prop changes (from Sidebar edits)
-    useEffect(() => {
-        // Check if the prop position is significantly different from the current state
-        // to avoid loops if the prop updates due to throttled state updates from this component
-        const propVec = new THREE.Vector3(...position)
-        if (currentPosition.distanceToSquared(propVec) > 0.01) {
-            // Use a small threshold
-            console.log(
-                'Sidebar position prop changed, updating UAV internal state:',
-                position
-            )
-            setCurrentPosition(propVec)
-            // Reset velocity and waypoints if needed when position is forced externally?
-            // velocity.current.set(0, 0, 0);
-            // setWaypoints([]); // Or regenerate path?
-            // currentWaypoint.current = 0;
-        }
-    }, [position]) // Depend only on the position prop
 
     // Storing initial position from props might still be useful for auto flight logic
     const initialPosition = useRef<THREE.Vector3>(
@@ -861,7 +842,7 @@ function Etoile({
                         key={device.id}
                         position={[
                             device.position_x,
-                            device.position_z + UAV_Y_OFFSET,
+                            device.position_z,
                             device.position_y,
                         ]}
                         scale={[UAV_SCALE, UAV_SCALE, UAV_SCALE]}
