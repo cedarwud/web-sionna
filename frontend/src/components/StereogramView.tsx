@@ -23,8 +23,8 @@ import { Device } from '../App'
 // 靜態檔案路徑
 const SCENE_URL = '/static/models/NYCU.glb'
 const UAV_MODEL_URL = '/api/v1/sionna/models/uav' // 替換為帶動畫的 GLB 模型路徑
-const BS_MODEL_URL = '/api/v1/sionna/models/tx' // BS 模型路徑
-const JAMMER_MODEL_URL = '/api/v1/sionna/models/jammer' // Jammer 模型路徑
+const BS_MODEL_URL = '/api/v1/sionna/models/tower' // BS 模型路徑
+const JAMMER_MODEL_URL = '/api/v1/sionna/models/jam' // Jammer 模型路徑
 const SATELLITE_TEXTURE_URL = '/static/NYCU/textures/EXPORT_GOOGLE_SAT_WM.png' // 衛星圖路徑
 
 // 材質和尺寸定義
@@ -843,7 +843,7 @@ function Etoile({
                             device.position_z + 5,
                             device.position_y,
                         ]}
-                        scale={[1, 1, 1]}
+                        scale={[0.05, 0.05, 0.05]}
                     />
                 )
             } else if (device.role === 'jammer') {
@@ -856,7 +856,7 @@ function Etoile({
                             device.position_z + 5,
                             device.position_y,
                         ]}
-                        scale={[10, 10, 10]}
+                        scale={[0.008, 0.008, 0.008]}
                     />
                 )
             } else {

@@ -4,10 +4,10 @@ DELETE FROM device;
 -- 插入發射器設備
 INSERT INTO device (name, position_x, position_y, position_z, orientation_x, orientation_y, orientation_z, role, power_dbm, active) 
 VALUES 
-('tx0', -100, -100, 5, 2.618, 0, 0, 'desired', 30, true),
-('tx1', -100, 50, 5, 0.524, 0, 0, 'desired', 30, true),
-('tx2', 100, -100, 5, -1.571, 0, 0, 'desired', 30, true),
-('jam1', 100, 50, 5, 1.571, 0, 0, 'jammer', 40, true),
-('jam2', 50, 50, 5, 1.571, 0, 0, 'jammer', 40, true),
-('jam3', -50, -50, 5, 1.571, 0, 0, 'jammer', 40, true),
+('tx0', -115, -100, -5, 2.618, 0, 0, 'desired', 30, true),
+('tx1', -100, 85, -5, 0.524, 0, 0, 'desired', 30, true),
+('tx2', 100, -100, -5, -1.571, 0, 0, 'desired', 30, true),
+('jam1', 100, 50, -5, 1.571, 0, 0, 'jammer', 40, true),
+('jam2', 60, 50, -5, 1.571, 0, 0, 'jammer', 40, true),
+('jam3', -50, -50, -5, 1.571, 0, 0, 'jammer', 40, true),
 ('rx', 0, 0, 50, 0, 0, 0, 'receiver', 0, true);
