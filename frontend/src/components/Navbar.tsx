@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import '../styles/Navbar.css'
 
 interface NavbarProps {
@@ -183,41 +183,93 @@ const CFRViewer = () => {
     const [isLoading, setIsLoading] = useState(true)
     const [imageUrl, setImageUrl] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
+    const [lastUpdate, setLastUpdate] = useState<string>('')
 
-    const IMAGE_PATH = '/static/images/cfr.png'
+    // 使用 ref 來跟踪當前的 imageUrl，避免在 useCallback 中產生依賴
+    const imageUrlRef = useRef<string | null>(null)
 
+    // 後端API路徑
+    const API_PATH = '/api/v1/sionna/cfr-plot'
+
+    // 記錄請求時間戳，用於顯示最後更新時間
+    const updateTimestamp = () => {
+        const now = new Date()
+        const timeString = now.toLocaleTimeString()
+        setLastUpdate(timeString)
+    }
+
+    // 同步 imageUrl 到 ref
     useEffect(() => {
-        setIsLoading(true)
+        imageUrlRef.current = imageUrl
+    }, [imageUrl])
 
-        fetch(IMAGE_PATH)
+    // 請求並加載 CFR 圖
+    const loadCFRImage = useCallback(() => {
+        setIsLoading(true)
+        setError(null)
+
+        // 向後端API發送請求以生成即時圖片
+        fetch(API_PATH)
             .then((response) => {
                 if (!response.ok) {
-                    throw new Error('無法載入 CFR Magnitude 圖')
+                    throw new Error(
+                        `API 請求失敗: ${response.status} ${response.statusText}`
+                    )
                 }
                 return response.blob()
             })
             .then((blob) => {
+                // 清理舊的 URL
+                if (imageUrlRef.current) {
+                    URL.revokeObjectURL(imageUrlRef.current)
+                }
+
                 const url = URL.createObjectURL(blob)
                 setImageUrl(url)
                 setIsLoading(false)
+                updateTimestamp()
             })
             .catch((err) => {
                 console.error('載入 CFR Magnitude 圖失敗:', err)
                 setError('無法載入 CFR Magnitude 圖: ' + err.message)
                 setIsLoading(false)
             })
+    }, [])
 
+    // 首次加載時獲取圖像
+    useEffect(() => {
+        loadCFRImage()
+
+        // 清理函數
         return () => {
-            if (imageUrl) {
-                URL.revokeObjectURL(imageUrl)
+            if (imageUrlRef.current) {
+                URL.revokeObjectURL(imageUrlRef.current)
             }
         }
-    }, [])
+    }, [loadCFRImage])
+
+    // 刷新按鈕處理函數
+    const handleRefresh = () => {
+        loadCFRImage()
+    }
 
     return (
         <div className="image-viewer">
+            <div className="image-controls">
+                <button
+                    className="refresh-button"
+                    onClick={handleRefresh}
+                    disabled={isLoading}
+                >
+                    {isLoading ? '正在生成...' : '重新生成圖表'}
+                </button>
+                {lastUpdate && (
+                    <span className="last-update">最後更新: {lastUpdate}</span>
+                )}
+            </div>
+
             {isLoading && (
-                <div className="loading">正在載入 CFR Magnitude 圖...</div>
+                <div className="loading">正在即時生成 CFR Magnitude 圖...</div>
             )}
             {error && <div className="error">{error}</div>}
             {imageUrl && (

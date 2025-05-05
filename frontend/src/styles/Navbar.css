@@ -297,4 +297,64 @@
   .delay-doppler-container {
     flex-direction: column;
   }
+}
+
+/* 新增CFR圖表控制元素的樣式 */
+.image-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  padding: 5px 10px;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+}
+
+.refresh-button {
+  padding: 8px 16px;
+  background-color: #4a6cf7;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.refresh-button:hover {
+  background-color: #3a57d7;
+}
+
+.refresh-button:disabled {
+  background-color: #a0a0a0;
+  cursor: not-allowed;
+}
+
+.last-update {
+  font-size: 0.9rem;
+  color: #555;
+  font-style: italic;
+}
+
+/* 確保圖像在容器中正確顯示 */
+.view-image {
+  max-width: 100%;
+  border-radius: 4px;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+}
+
+/* 載入和錯誤訊息樣式 */
+.loading, .error {
+  padding: 20px;
+  text-align: center;
+}
+
+.loading {
+  color: #4a6cf7;
+}
+
+.error {
+  color: #e74c3c;
+  background-color: #ffeeee;
+  border-radius: 4px;
 } 
