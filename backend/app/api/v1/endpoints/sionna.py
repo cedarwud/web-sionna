@@ -1221,12 +1221,12 @@ async def trigger_generate_scene_image(
 
 
 @router.get("/cfr-plot", tags=["Sionna Simulation"])
-async def get_cfr_plot_endpoint():
+async def get_cfr_plot_endpoint(session: AsyncSession = Depends(get_session)):
     """生成並返回 Channel Frequency Response (CFR) 圖，基於 Sionna 的模擬。"""
     logger.info("--- API Request: /cfr-plot ---")
     
-    # 使用 run_in_threadpool 執行同步函數，避免阻塞
-    if await generate_cfr_plot(str(CFR_PLOT_IMAGE_PATH)):
+    # 修改：傳遞 session 參數給 generate_cfr_plot 函數
+    if await generate_cfr_plot(session=session, output_path=str(CFR_PLOT_IMAGE_PATH)):
         if os.path.exists(CFR_PLOT_IMAGE_PATH):
             file_size = os.path.getsize(CFR_PLOT_IMAGE_PATH)
             logger.info(f"返回 CFR 圖像，文件路徑: {CFR_PLOT_IMAGE_PATH} (大小: {file_size} 字節)")

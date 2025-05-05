@@ -1088,14 +1088,48 @@ async def generate_scene_with_devices_image(
 
 
 # 新增函數: generate_cfr_plot
-async def generate_cfr_plot(output_path: str = str(CFR_PLOT_IMAGE_PATH)) -> bool:
+async def generate_cfr_plot(
+    session: AsyncSession,
+    output_path: str = str(CFR_PLOT_IMAGE_PATH)
+) -> bool:
     """
     生成 Channel Frequency Response (CFR) 圖，基於 Sionna 的模擬。
     這是從 cfr.py 整合的功能。
+    
+    現在會從資料庫中獲取接收器 (receiver) 參數。
     """
     logger.info("Entering generate_cfr_plot function...")
     
     try:
+        # 設定 GPU
+        os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+        gpus = tf.config.list_physical_devices("GPU")
+        if gpus:
+            tf.config.experimental.set_memory_growth(gpus[0], True)
+            logger.info("GPU memory growth enabled")
+        else:
+            logger.info("No GPU found, using CPU")
+        
+        # 從資料庫獲取活動的接收器
+        logger.info("Fetching active receivers from database...")
+        active_receivers = await crud_device.get_devices_by_role(
+            db=session,
+            role=DeviceRole.RECEIVER.value,
+            active_only=True
+        )
+        
+        if not active_receivers:
+            logger.warning("No active receivers found in database. Using default receiver parameters.")
+            # 使用默認的接收器參數
+            rx_name = "rx"
+            rx_position = [0, 0, 20]
+        else:
+            # 使用第一個活動接收器的參數
+            receiver = active_receivers[0]
+            rx_name = receiver.name
+            rx_position = [receiver.position_x, receiver.position_y, receiver.position_z]
+            logger.info(f"Using receiver '{rx_name}' with position {rx_position}")
+
         # 參數設置
         SCENE_NAME = str(NYCU_XML_PATH)
         logger.info(f"Loading scene from: {SCENE_NAME}")
@@ -1119,7 +1153,9 @@ async def generate_cfr_plot(output_path: str = str(CFR_PLOT_IMAGE_PATH)) -> bool
             ("jam3", [-50, -50, 20], [1.5707963267948966, 0, 0], "jammer", 40),
         ]
         
-        RX_CONFIG = ("rx", [0, 0, 20])
+        # 使用從資料庫獲取的接收器參數
+        RX_CONFIG = (rx_name, rx_position)
+        
         PATHSOLVER_ARGS = {
             "max_depth": 10, 
             "los": True, 
@@ -1157,7 +1193,7 @@ async def generate_cfr_plot(output_path: str = str(CFR_PLOT_IMAGE_PATH)) -> bool
             add_tx(scene, name, pos, ori, role, p_dbm)
 
         # 添加接收器
-        logger.info("Adding receiver")
+        logger.info(f"Adding receiver '{rx_name}' at position {rx_position}")
         rx_name, rx_pos = RX_CONFIG
         scene.add(SionnaReceiver(name=rx_name, position=rx_pos))
 
