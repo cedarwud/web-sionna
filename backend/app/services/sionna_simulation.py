@@ -414,8 +414,8 @@ async def generate_scene_with_paths_image(
         # --- 4. Overlay Devices --- (Keep)
         logger.info("Overlaying devices onto pyrender scene...")
         # Define cone dimensions and rotation for downward pointing
-        CONE_RADIUS = 7.0  # Slightly Reduced
-        CONE_HEIGHT = 22.0  # Slightly Reduced
+        CONE_RADIUS = 12.0  # 放大圓點
+        CONE_HEIGHT = 36.0  # 放大圓點
         # Rotate cone model (-90 deg around X) to align Trimesh +Z with Pyrender -Y (down)
         down_rotation_matrix = trimesh.transformations.rotation_matrix(
             -np.pi / 2, [1, 0, 0]
@@ -434,7 +434,7 @@ async def generate_scene_with_paths_image(
             baseColorFactor=[1.0, 0.27, 0.0, 1.0]  # Orange-Red
         )
         INT_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[0.0, 0.0, 1.0, 1.0]  # Pure Blue
+            baseColorFactor=[0.4, 0.7, 1.0, 1.0]  # 較淺的藍色
         )
         # White material for outline
         WHITE_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
@@ -442,8 +442,8 @@ async def generate_scene_with_paths_image(
         )
 
         # Outline disk dimensions
-        OUTLINE_RADIUS = CONE_RADIUS + 1.0  # Slightly larger radius
-        OUTLINE_HEIGHT = 0.5  # Very thin
+        OUTLINE_RADIUS = CONE_RADIUS + 1.0  # 跟 cone 一起變大
+        OUTLINE_HEIGHT = 0.5  # 保持不變
 
         # Add transmitters to scene
         for tx_data in transmitters_data:
@@ -934,8 +934,8 @@ async def generate_scene_with_devices_image(
         # --- 3. Overlay Devices ---
         logger.info("Overlaying devices onto pyrender scene...")
         # Define cone dimensions and rotation for downward pointing
-        CONE_RADIUS = 7.0  # Slightly Reduced
-        CONE_HEIGHT = 22.0  # Slightly Reduced
+        CONE_RADIUS = 12.0  # 放大圓點
+        CONE_HEIGHT = 36.0  # 放大圓點
         # Rotate cone model (-90 deg around X) to align Trimesh +Z with Pyrender -Y (down)
         down_rotation_matrix = trimesh.transformations.rotation_matrix(
             -np.pi / 2, [1, 0, 0]
@@ -954,7 +954,7 @@ async def generate_scene_with_devices_image(
             baseColorFactor=[1.0, 0.27, 0.0, 1.0]  # Orange-Red
         )
         INT_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[0.0, 0.0, 1.0, 1.0]  # Pure Blue
+            baseColorFactor=[0.4, 0.7, 1.0, 1.0]  # 較淺的藍色
         )
         # White material for outline
         WHITE_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
@@ -962,8 +962,8 @@ async def generate_scene_with_devices_image(
         )
 
         # Outline disk dimensions
-        OUTLINE_RADIUS = CONE_RADIUS + 1.0  # Slightly larger radius
-        OUTLINE_HEIGHT = 0.5  # Very thin
+        OUTLINE_RADIUS = CONE_RADIUS + 1.0  # 跟 cone 一起變大
+        OUTLINE_HEIGHT = 0.5  # 保持不變
 
         # Add transmitters to scene
         for tx_data in transmitters_data:
