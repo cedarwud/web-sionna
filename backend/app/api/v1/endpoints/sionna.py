@@ -20,6 +20,7 @@ from app.services.sionna_simulation import (  # Import service functions
     generate_scene_with_devices_image,  # 新增的函數
     generate_cfr_plot,  # 新增: 導入剛添加的 CFR 繪圖函數
     generate_sinr_map,  # 新增: 導入 SINR 地圖生成函數
+    generate_doppler_plots,  # 新增: 導入延遲多普勒圖生成函數
 )
 from app.core.config import (  # Import constants
     SCENE_WITH_PATHS_IMAGE_PATH,
@@ -28,6 +29,8 @@ from app.core.config import (  # Import constants
     MODELS_DIR,
     CFR_PLOT_IMAGE_PATH,  # 新增: 導入 CFR 圖片路徑
     SINR_MAP_IMAGE_PATH,  # 新增: 導入 SINR 地圖路徑
+    UNSCALED_DOPPLER_IMAGE_PATH,  # 新增: 導入未縮放的延遲多普勒圖路徑
+    POWER_SCALED_DOPPLER_IMAGE_PATH,  # 新增: 導入功率縮放的延遲多普勒圖路徑
 )
 
 # 新增: 導入 run_in_threadpool
@@ -1310,3 +1313,127 @@ async def get_sinr_map_endpoint(
     else:
         logger.error("生成 SINR 地圖失敗。")
         raise HTTPException(status_code=500, detail="生成 SINR 地圖失敗。")
+
+
+@router.get("/doppler-plots", tags=["Sionna Simulation"])
+async def get_doppler_plots_endpoint(session: AsyncSession = Depends(get_session)):
+    """
+    生成並返回延遲多普勒圖，包括未縮放和功率縮放兩個版本。
+    此端點會返回一個包含兩個圖像URL的JSON對象。
+    """
+    logger.info("--- API Request: /doppler-plots ---")
+
+    # 生成延遲多普勒圖
+    success = await generate_doppler_plots(
+        session, str(UNSCALED_DOPPLER_IMAGE_PATH), str(POWER_SCALED_DOPPLER_IMAGE_PATH)
+    )
+
+    if not success:
+        logger.error("延遲多普勒圖生成失敗")
+        raise HTTPException(status_code=500, detail="延遲多普勒圖生成失敗")
+
+    # 檢查兩個圖像是否都已生成
+    if not os.path.exists(UNSCALED_DOPPLER_IMAGE_PATH) or not os.path.exists(
+        POWER_SCALED_DOPPLER_IMAGE_PATH
+    ):
+        logger.error("延遲多普勒圖文件未生成或找不到")
+        raise HTTPException(status_code=500, detail="延遲多普勒圖文件未生成或找不到")
+
+    # 返回圖像URLs的JSON
+    base_url = "/static/images"  # 前端訪問靜態文件的基礎URL
+    return {
+        "unscaled_plot_url": f"{base_url}/unscaled_delay_doppler.png",
+        "power_scaled_plot_url": f"{base_url}/power_scaled_delay_doppler.png",
+    }
+
+
+@router.get("/unscaled-doppler-image", tags=["Sionna Simulation"])
+async def get_unscaled_doppler_image(session: AsyncSession = Depends(get_session)):
+    """
+    返回未縮放的延遲多普勒圖圖像文件。
+    會首先檢查圖像是否存在，如果不存在則會生成。
+    """
+    logger.info("--- API Request: /unscaled-doppler-image ---")
+
+    # 檢查文件是否已經存在
+    if (
+        not os.path.exists(UNSCALED_DOPPLER_IMAGE_PATH)
+        or os.path.getsize(UNSCALED_DOPPLER_IMAGE_PATH) == 0
+    ):
+        logger.info("未縮放的延遲多普勒圖不存在或為空，正在生成...")
+        success = await generate_doppler_plots(
+            session,
+            str(UNSCALED_DOPPLER_IMAGE_PATH),
+            str(POWER_SCALED_DOPPLER_IMAGE_PATH),
+        )
+        if not success:
+            logger.error("生成延遲多普勒圖失敗")
+            raise HTTPException(status_code=500, detail="生成延遲多普勒圖失敗")
+
+    # 再次檢查文件是否存在
+    if not os.path.exists(UNSCALED_DOPPLER_IMAGE_PATH):
+        logger.error(f"文件生成後仍不存在: {UNSCALED_DOPPLER_IMAGE_PATH}")
+        raise HTTPException(status_code=500, detail="未縮放的延遲多普勒圖生成失敗")
+
+    # 使用StreamingResponse返回文件
+    def iterfile():
+        with open(UNSCALED_DOPPLER_IMAGE_PATH, "rb") as f:
+            # 每次讀取4KB
+            chunk = f.read(4096)
+            while chunk:
+                yield chunk
+                chunk = f.read(4096)
+
+    return StreamingResponse(
+        iterfile(),
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f"attachment; filename=unscaled_delay_doppler.png"
+        },
+    )
+
+
+@router.get("/power-scaled-doppler-image", tags=["Sionna Simulation"])
+async def get_power_scaled_doppler_image(session: AsyncSession = Depends(get_session)):
+    """
+    返回功率縮放的延遲多普勒圖圖像文件。
+    會首先檢查圖像是否存在，如果不存在則會生成。
+    """
+    logger.info("--- API Request: /power-scaled-doppler-image ---")
+
+    # 檢查文件是否已經存在
+    if (
+        not os.path.exists(POWER_SCALED_DOPPLER_IMAGE_PATH)
+        or os.path.getsize(POWER_SCALED_DOPPLER_IMAGE_PATH) == 0
+    ):
+        logger.info("功率縮放的延遲多普勒圖不存在或為空，正在生成...")
+        success = await generate_doppler_plots(
+            session,
+            str(UNSCALED_DOPPLER_IMAGE_PATH),
+            str(POWER_SCALED_DOPPLER_IMAGE_PATH),
+        )
+        if not success:
+            logger.error("生成延遲多普勒圖失敗")
+            raise HTTPException(status_code=500, detail="生成延遲多普勒圖失敗")
+
+    # 再次檢查文件是否存在
+    if not os.path.exists(POWER_SCALED_DOPPLER_IMAGE_PATH):
+        logger.error(f"文件生成後仍不存在: {POWER_SCALED_DOPPLER_IMAGE_PATH}")
+        raise HTTPException(status_code=500, detail="功率縮放的延遲多普勒圖生成失敗")
+
+    # 使用StreamingResponse返回文件
+    def iterfile():
+        with open(POWER_SCALED_DOPPLER_IMAGE_PATH, "rb") as f:
+            # 每次讀取4KB
+            chunk = f.read(4096)
+            while chunk:
+                yield chunk
+                chunk = f.read(4096)
+
+    return StreamingResponse(
+        iterfile(),
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f"attachment; filename=power_scaled_delay_doppler.png"
+        },
+    )

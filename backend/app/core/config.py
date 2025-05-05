@@ -60,6 +60,12 @@ CONSTELLATION_IMAGE_PATH = OUTPUT_DIR / "constellation_diagram.png"
 EMPTY_SCENE_IMAGE_PATH = OUTPUT_DIR / "empty_scene.png"
 CFR_PLOT_IMAGE_PATH = OUTPUT_DIR / "cfr_plot.png"  # 新增: CFR 圖像路徑
 SINR_MAP_IMAGE_PATH = OUTPUT_DIR / "sinr_map.png"  # 新增: SINR 地圖路徑
+UNSCALED_DOPPLER_IMAGE_PATH = (
+    OUTPUT_DIR / "unscaled_delay_doppler.png"
+)  # 新增: 未縮放的延遲多普勒圖路徑
+POWER_SCALED_DOPPLER_IMAGE_PATH = (
+    OUTPUT_DIR / "power_scaled_delay_doppler.png"
+)  # 新增: 功率縮放的延遲多普勒圖路徑
 
 # logger.info(f"Project Root (estimated): {PROJECT_ROOT}") # 不再需要
 logger.info(f"Static Directory (in container): {STATIC_DIR}")
@@ -81,6 +87,12 @@ logger.info(
 logger.info(
     f"SINR Map Image Path (in container): {SINR_MAP_IMAGE_PATH}"
 )  # 新增: 記錄 SINR 地圖路徑
+logger.info(
+    f"Unscaled Delay Doppler Image Path (in container): {UNSCALED_DOPPLER_IMAGE_PATH}"
+)  # 新增: 未縮放的延遲多普勒圖路徑
+logger.info(
+    f"Power Scaled Delay Doppler Image Path (in container): {POWER_SCALED_DOPPLER_IMAGE_PATH}"
+)  # 新增: 功率縮放的延遲多普勒圖路徑
 
 
 # --- GPU/CPU Configuration ---

@@ -141,7 +141,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                 </div>
             )}
 
-            {/* CFR Magnitude 彈窗 */}
+            {/* Constellation & CFR 彈窗 */}
             {showCFRModal && (
                 <div className="modal-backdrop" onClick={closeCFRModal}>
                     <div
@@ -149,7 +149,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="modal-header">
-                            <h3>CFR Magnitude</h3>
+                            <h3>Constellation & CFR</h3>
                             <button
                                 className="close-button"
                                 onClick={closeCFRModal}
@@ -175,7 +175,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="modal-header">
-                            <h3>Delay–Doppler 圖</h3>
+                            <h3>Delay–Doppler</h3>
                             <button
                                 className="close-button"
                                 onClick={closeDelayDopplerModal}
@@ -320,69 +320,22 @@ const SINRViewer = () => {
 
     return (
         <div className="image-viewer">
-            {/* 暫時隱藏控制面板 */}
-            {/* 
+            {/* 控制面板 */}
             <div className="image-controls">
-                <div className="control-group">
-                    <label>
-                        SINR Min (dB):
-                        <input 
-                            type="number" 
-                            value={sinrVmin} 
-                            onChange={handleSinrVminChange} 
-                            min="-100" 
-                            max="0" 
-                            step="5"
-                        />
-                    </label>
-                    <label>
-                        SINR Max (dB):
-                        <input 
-                            type="number" 
-                            value={sinrVmax} 
-                            onChange={handleSinrVmaxChange} 
-                            min="-50" 
-                            max="50" 
-                            step="5"
-                        />
-                    </label>
-                </div>
-                <div className="control-group">
-                    <label>
-                        網格大小 (m):
-                        <input 
-                            type="number" 
-                            value={cellSize} 
-                            onChange={handleCellSizeChange} 
-                            min="0.1" 
-                            max="10" 
-                            step="0.1"
-                        />
-                    </label>
-                    <label>
-                        採樣數量:
-                        <select value={samplesPerTx} onChange={handleSamplesChange}>
-                            <option value={10**5}>10^5 (快速)</option>
-                            <option value={10**6}>10^6 (一般)</option>
-                            <option value={10**7}>10^7 (精確)</option>
-                        </select>
-                    </label>
-                </div>
                 <button
                     className="refresh-button"
                     onClick={handleRefresh}
                     disabled={isLoading}
                 >
-                    {isLoading ? '正在生成...' : '生成 SINR 地圖'}
+                    {isLoading ? '正在生成...' : '重新生成圖表'}
                 </button>
                 {lastUpdate && (
                     <span className="last-update">最後更新: {lastUpdate}</span>
                 )}
             </div>
-            */}
 
             {isLoading && (
-                <div className="loading">正在即時生成 SINR 地圖...</div>
+                <div className="loading">正在即時生成 SINR Map...</div>
             )}
             {error && <div className="error">{error}</div>}
             {imageUrl && (
@@ -392,7 +345,7 @@ const SINRViewer = () => {
     )
 }
 
-// CFR Magnitude 顯示組件
+// Constellation & CFR 顯示組件
 const CFRViewer = () => {
     const [isLoading, setIsLoading] = useState(true)
     const [imageUrl, setImageUrl] = useState<string | null>(null)
@@ -444,8 +397,8 @@ const CFRViewer = () => {
                 updateTimestamp()
             })
             .catch((err) => {
-                console.error('載入 CFR Magnitude 圖失敗:', err)
-                setError('無法載入 CFR Magnitude 圖: ' + err.message)
+                console.error('載入 Constellation & CFR 失敗:', err)
+                setError('無法載入 Constellation & CFR: ' + err.message)
                 setIsLoading(false)
             })
     }, [])
@@ -483,13 +436,15 @@ const CFRViewer = () => {
             </div>
 
             {isLoading && (
-                <div className="loading">正在即時生成 CFR Magnitude 圖...</div>
+                <div className="loading">
+                    正在即時生成 Constellation & CFR...
+                </div>
             )}
             {error && <div className="error">{error}</div>}
             {imageUrl && (
                 <img
                     src={imageUrl}
-                    alt="CFR Magnitude"
+                    alt="Constellation & CFR"
                     className="view-image"
                 />
             )}
@@ -500,87 +455,162 @@ const CFRViewer = () => {
 // Delay-Doppler 顯示組件
 const DelayDopplerViewer = () => {
     const [isLoading, setIsLoading] = useState(true)
-    const [lowImageUrl, setLowImageUrl] = useState<string | null>(null)
-    const [highImageUrl, setHighImageUrl] = useState<string | null>(null)
+    const [unscaledImageUrl, setUnscaledImageUrl] = useState<string | null>(
+        null
+    )
+    const [powerScaledImageUrl, setPowerScaledImageUrl] = useState<
+        string | null
+    >(null)
     const [error, setError] = useState<string | null>(null)
+    const [lastUpdate, setLastUpdate] = useState<string>('')
 
-    const LOW_IMAGE_PATH = '/static/images/low.png'
-    const HIGH_IMAGE_PATH = '/static/images/high.png'
+    // 使用 ref 來跟踪當前的 imageUrl，避免在 useCallback 中產生依賴
+    const unscaledImageUrlRef = useRef<string | null>(null)
+    const powerScaledImageUrlRef = useRef<string | null>(null)
 
+    // 後端API路徑
+    const UNSCALED_API_PATH = '/api/v1/sionna/unscaled-doppler-image'
+    const POWER_SCALED_API_PATH = '/api/v1/sionna/power-scaled-doppler-image'
+
+    // 記錄請求時間戳，用於顯示最後更新時間
+    const updateTimestamp = () => {
+        const now = new Date()
+        const timeString = now.toLocaleTimeString()
+        setLastUpdate(timeString)
+    }
+
+    // 同步 imageUrl 到 ref
     useEffect(() => {
+        unscaledImageUrlRef.current = unscaledImageUrl
+        powerScaledImageUrlRef.current = powerScaledImageUrl
+    }, [unscaledImageUrl, powerScaledImageUrl])
+
+    // 請求並加載延遲多普勒圖
+    const loadDopplerImages = useCallback(() => {
         setIsLoading(true)
-        let loadedCount = 0
+        setError(null)
+
+        // 計數器來追踪兩個圖像是否都已載入
+        let imagesLoaded = 0
         const totalImages = 2
 
-        // 加載低功率圖像
-        fetch(LOW_IMAGE_PATH)
+        // 載入未縮放的延遲多普勒圖
+        fetch(UNSCALED_API_PATH)
             .then((response) => {
                 if (!response.ok) {
-                    throw new Error('無法載入低功率 Delay-Doppler 圖')
+                    throw new Error(
+                        `API 請求失敗: ${response.status} ${response.statusText}`
+                    )
                 }
                 return response.blob()
             })
             .then((blob) => {
+                // 清理舊的 URL
+                if (unscaledImageUrlRef.current) {
+                    URL.revokeObjectURL(unscaledImageUrlRef.current)
+                }
+
                 const url = URL.createObjectURL(blob)
-                setLowImageUrl(url)
-                loadedCount++
-                if (loadedCount === totalImages) setIsLoading(false)
+                setUnscaledImageUrl(url)
+                imagesLoaded++
+                if (imagesLoaded === totalImages) {
+                    setIsLoading(false)
+                    updateTimestamp()
+                }
             })
             .catch((err) => {
-                console.error('載入低功率 Delay-Doppler 圖失敗:', err)
-                setError('無法載入低功率 Delay-Doppler 圖: ' + err.message)
+                console.error('載入未縮放延遲多普勒圖失敗:', err)
+                setError('無法載入未縮放延遲多普勒圖: ' + err.message)
                 setIsLoading(false)
             })
 
-        // 加載高功率圖像
-        fetch(HIGH_IMAGE_PATH)
+        // 載入功率縮放的延遲多普勒圖
+        fetch(POWER_SCALED_API_PATH)
             .then((response) => {
                 if (!response.ok) {
-                    throw new Error('無法載入高功率 Delay-Doppler 圖')
+                    throw new Error(
+                        `API 請求失敗: ${response.status} ${response.statusText}`
+                    )
                 }
                 return response.blob()
             })
             .then((blob) => {
+                // 清理舊的 URL
+                if (powerScaledImageUrlRef.current) {
+                    URL.revokeObjectURL(powerScaledImageUrlRef.current)
+                }
+
                 const url = URL.createObjectURL(blob)
-                setHighImageUrl(url)
-                loadedCount++
-                if (loadedCount === totalImages) setIsLoading(false)
+                setPowerScaledImageUrl(url)
+                imagesLoaded++
+                if (imagesLoaded === totalImages) {
+                    setIsLoading(false)
+                    updateTimestamp()
+                }
             })
             .catch((err) => {
-                console.error('載入高功率 Delay-Doppler 圖失敗:', err)
-                setError('無法載入高功率 Delay-Doppler 圖: ' + err.message)
+                console.error('載入功率縮放延遲多普勒圖失敗:', err)
+                setError('無法載入功率縮放延遲多普勒圖: ' + err.message)
                 setIsLoading(false)
             })
-
-        return () => {
-            if (lowImageUrl) URL.revokeObjectURL(lowImageUrl)
-            if (highImageUrl) URL.revokeObjectURL(highImageUrl)
-        }
     }, [])
+
+    // 首次加載時獲取圖像
+    useEffect(() => {
+        loadDopplerImages()
+
+        // 清理函數
+        return () => {
+            if (unscaledImageUrlRef.current) {
+                URL.revokeObjectURL(unscaledImageUrlRef.current)
+            }
+            if (powerScaledImageUrlRef.current) {
+                URL.revokeObjectURL(powerScaledImageUrlRef.current)
+            }
+        }
+    }, [loadDopplerImages])
+
+    // 刷新按鈕處理函數
+    const handleRefresh = () => {
+        loadDopplerImages()
+    }
 
     return (
         <div className="image-viewer">
+            <div className="image-controls">
+                <button
+                    className="refresh-button"
+                    onClick={handleRefresh}
+                    disabled={isLoading}
+                >
+                    {isLoading ? '正在生成...' : '重新生成圖表'}
+                </button>
+                {lastUpdate && (
+                    <span className="last-update">最後更新: {lastUpdate}</span>
+                )}
+            </div>
+
             {isLoading && (
-                <div className="loading">正在載入 Delay-Doppler 圖...</div>
+                <div className="loading">正在即時生成 Delay-Doppler...</div>
             )}
             {error && <div className="error">{error}</div>}
             <div className="delay-doppler-container">
-                {lowImageUrl && (
+                {unscaledImageUrl && (
                     <div className="image-item">
-                        <h4>Low Power</h4>
+                        {/* <h4>Unscaled Channels</h4> */}
                         <img
-                            src={lowImageUrl}
-                            alt="Low Power Delay-Doppler"
+                            src={unscaledImageUrl}
+                            alt="Unscaled Delay-Doppler"
                             className="view-image"
                         />
                     </div>
                 )}
-                {highImageUrl && (
+                {powerScaledImageUrl && (
                     <div className="image-item">
-                        <h4>High Power</h4>
+                        {/* <h4>Power-Scaled Channels</h4> */}
                         <img
-                            src={highImageUrl}
-                            alt="High Power Delay-Doppler"
+                            src={powerScaledImageUrl}
+                            alt="Power-Scaled Delay-Doppler"
                             className="view-image"
                         />
                     </div>
