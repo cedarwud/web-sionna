@@ -14,6 +14,7 @@ from sionna.rt import (
     PlanarArray,
     PathSolver,
     subcarrier_frequencies,
+    RadioMapSolver,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -1089,37 +1090,26 @@ async def generate_scene_with_devices_image(
 
 # 新增函數: generate_cfr_plot
 async def generate_cfr_plot(
-    session: AsyncSession,
-    output_path: str = str(CFR_PLOT_IMAGE_PATH)
+    session: AsyncSession, output_path: str = str(CFR_PLOT_IMAGE_PATH)
 ) -> bool:
     """
     生成 Channel Frequency Response (CFR) 圖，基於 Sionna 的模擬。
     這是從 cfr.py 整合的功能。
-    
+
     從資料庫中獲取接收器 (receiver)、發射器 (desired) 和干擾器 (jammer) 參數。
     """
     logger.info("Entering generate_cfr_plot function...")
-    
+
     try:
-        # 設定 GPU
-        os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-        gpus = tf.config.list_physical_devices("GPU")
-        if gpus:
-            tf.config.experimental.set_memory_growth(gpus[0], True)
-            logger.info("GPU memory growth enabled")
-        else:
-            logger.info("No GPU found, using CPU")
-        
-        # 從資料庫獲取活動的接收器
         logger.info("Fetching active receivers from database...")
         active_receivers = await crud_device.get_devices_by_role(
-            db=session,
-            role=DeviceRole.RECEIVER.value,
-            active_only=True
+            db=session, role=DeviceRole.RECEIVER.value, active_only=True
         )
-        
+
         if not active_receivers:
-            logger.warning("No active receivers found in database. Using default receiver parameters.")
+            logger.warning(
+                "No active receivers found in database. Using default receiver parameters."
+            )
             # 使用默認的接收器參數
             rx_name = "rx"
             rx_position = [0, 0, 20]
@@ -1127,31 +1117,33 @@ async def generate_cfr_plot(
             # 使用第一個活動接收器的參數
             receiver = active_receivers[0]
             rx_name = receiver.name
-            rx_position = [receiver.position_x, receiver.position_y, receiver.position_z]
+            rx_position = [
+                receiver.position_x,
+                receiver.position_y,
+                receiver.position_z,
+            ]
             logger.info(f"Using receiver '{rx_name}' with position {rx_position}")
-        
+
         # 從資料庫獲取活動的發射器 (desired)
         logger.info("Fetching active desired transmitters from database...")
         active_desired = await crud_device.get_devices_by_role(
-            db=session,
-            role=DeviceRole.DESIRED.value,
-            active_only=True
+            db=session, role=DeviceRole.DESIRED.value, active_only=True
         )
-        
+
         # 從資料庫獲取活動的干擾器 (jammer)
         logger.info("Fetching active jammers from database...")
         active_jammers = await crud_device.get_devices_by_role(
-            db=session,
-            role=DeviceRole.JAMMER.value,
-            active_only=True
+            db=session, role=DeviceRole.JAMMER.value, active_only=True
         )
-        
+
         # 構建 TX_LIST (發射器和干擾器列表)
         TX_LIST = []
-        
+
         # 添加發射器
         if not active_desired:
-            logger.warning("No active desired transmitters found in database. Simulation might not be meaningful.")
+            logger.warning(
+                "No active desired transmitters found in database. Simulation might not be meaningful."
+            )
             # 添加默認的發射器參數 # REMOVED
         else:
             # 添加從資料庫獲取的發射器
@@ -1160,57 +1152,83 @@ async def generate_cfr_plot(
                 tx_position = [tx.position_x, tx.position_y, tx.position_z]
                 tx_orientation = [tx.orientation_x, tx.orientation_y, tx.orientation_z]
                 tx_power = tx.power_dbm
-                
-                TX_LIST.append((tx_name, tx_position, tx_orientation, "desired", tx_power))
-                logger.info(f"Added desired transmitter: {tx_name}, position: {tx_position}, orientation: {tx_orientation}, power: {tx_power} dBm")
-        
+
+                TX_LIST.append(
+                    (tx_name, tx_position, tx_orientation, "desired", tx_power)
+                )
+                logger.info(
+                    f"Added desired transmitter: {tx_name}, position: {tx_position}, orientation: {tx_orientation}, power: {tx_power} dBm"
+                )
+
         # 添加干擾器
         if not active_jammers:
-            logger.warning("No active jammers found in database. Interference simulation will not run.")
+            logger.warning(
+                "No active jammers found in database. Interference simulation will not run."
+            )
             # 添加默認的干擾器參數 # REMOVED
         else:
             # 添加從資料庫獲取的干擾器
             for i, jammer in enumerate(active_jammers):
                 jammer_name = jammer.name
-                jammer_position = [jammer.position_x, jammer.position_y, jammer.position_z]
-                jammer_orientation = [jammer.orientation_x, jammer.orientation_y, jammer.orientation_z]
+                jammer_position = [
+                    jammer.position_x,
+                    jammer.position_y,
+                    jammer.position_z,
+                ]
+                jammer_orientation = [
+                    jammer.orientation_x,
+                    jammer.orientation_y,
+                    jammer.orientation_z,
+                ]
                 jammer_power = jammer.power_dbm
-                
-                TX_LIST.append((jammer_name, jammer_position, jammer_orientation, "jammer", jammer_power))
-                logger.info(f"Added jammer: {jammer_name}, position: {jammer_position}, orientation: {jammer_orientation}, power: {jammer_power} dBm")
-        
+
+                TX_LIST.append(
+                    (
+                        jammer_name,
+                        jammer_position,
+                        jammer_orientation,
+                        "jammer",
+                        jammer_power,
+                    )
+                )
+                logger.info(
+                    f"Added jammer: {jammer_name}, position: {jammer_position}, orientation: {jammer_orientation}, power: {jammer_power} dBm"
+                )
+
         # 檢查是否有足夠的發射器和干擾器
         if not TX_LIST:
-            logger.error("No transmitters or jammers available for simulation. Cannot proceed.")
+            logger.error(
+                "No transmitters or jammers available for simulation. Cannot proceed."
+            )
             return False
-        
+
         # 參數設置
         SCENE_NAME = str(NYCU_XML_PATH)
         logger.info(f"Loading scene from: {SCENE_NAME}")
-        
+
         TX_ARRAY_CONFIG = {
-            "num_rows": 1, 
-            "num_cols": 1, 
-            "vertical_spacing": 0.5, 
-            "horizontal_spacing": 0.5, 
-            "pattern": "iso", 
-            "polarization": "V"
+            "num_rows": 1,
+            "num_cols": 1,
+            "vertical_spacing": 0.5,
+            "horizontal_spacing": 0.5,
+            "pattern": "iso",
+            "polarization": "V",
         }
         RX_ARRAY_CONFIG = TX_ARRAY_CONFIG
-        
+
         # 使用從資料庫獲取的接收器參數
         RX_CONFIG = (rx_name, rx_position)
-        
+
         PATHSOLVER_ARGS = {
-            "max_depth": 10, 
-            "los": True, 
-            "specular_reflection": True, 
-            "diffuse_reflection": False, 
-            "refraction": False, 
-            "synthetic_array": False, 
-            "seed": 41
+            "max_depth": 10,
+            "los": True,
+            "specular_reflection": True,
+            "diffuse_reflection": False,
+            "refraction": False,
+            "synthetic_array": False,
+            "seed": 41,
         }
-        
+
         N_SYMBOLS = 1
         N_SUBCARRIERS = 1024
         SUBCARRIER_SPACING = 30e3
@@ -1228,8 +1246,11 @@ async def generate_cfr_plot(
 
         # 添加發射器
         logger.info("Adding transmitters")
+
         def add_tx(scene, name, pos, ori, role, power_dbm):
-            tx = SionnaTransmitter(name=name, position=pos, orientation=ori, power_dbm=power_dbm)
+            tx = SionnaTransmitter(
+                name=name, position=pos, orientation=ori, power_dbm=power_dbm
+            )
             tx.role = role
             scene.add(tx)
             return tx
@@ -1247,12 +1268,16 @@ async def generate_cfr_plot(
         all_txs = [scene.get(n) for n in tx_names]
         idx_des = [i for i, tx in enumerate(all_txs) if tx.role == "desired"]
         idx_jam = [i for i, tx in enumerate(all_txs) if tx.role == "jammer"]
-        
+
         # 檢查是否有發射器和干擾器
         if not idx_des:
-            logger.warning("No desired transmitters available in scene. CFR calculation may not be accurate.")
+            logger.warning(
+                "No desired transmitters available in scene. CFR calculation may not be accurate."
+            )
         if not idx_jam:
-            logger.warning("No jammers available in scene. Interference will not be present in plot.")
+            logger.warning(
+                "No jammers available in scene. Interference will not be present in plot."
+            )
 
         # 計算 CFR
         logger.info("Computing CFR")
@@ -1262,27 +1287,27 @@ async def generate_cfr_plot(
         paths = PathSolver()(scene, **PATHSOLVER_ARGS)
 
         def dbm2w(dbm):
-            return 10**(dbm/10) / 1000
+            return 10 ** (dbm / 10) / 1000
 
         tx_powers = [dbm2w(scene.get(n).power_dbm) for n in tx_names]
         ofdm_symbol_duration = 1 / SUBCARRIER_SPACING
         H_unit = paths.cfr(
             frequencies=freqs,
-            sampling_frequency=1/ofdm_symbol_duration,
+            sampling_frequency=1 / ofdm_symbol_duration,
             num_time_steps=N_SUBCARRIERS,
             normalize_delays=True,
             normalize=False,
-            out_type="numpy"
+            out_type="numpy",
         ).squeeze()  # shape: (num_tx, T, F)
 
         H_all = np.sqrt(np.array(tx_powers)[:, None, None]) * H_unit
         H = H_unit[:, 0, :]  # 取第一個時間步
-        
+
         # 安全處理：確保有所需的發射器
         h_main = np.zeros(N_SUBCARRIERS, dtype=complex)
         if idx_des:
             h_main = sum(np.sqrt(tx_powers[i]) * H[i] for i in idx_des)
-        
+
         h_intf = np.zeros(N_SUBCARRIERS, dtype=complex)
         if idx_jam:
             h_intf = sum(np.sqrt(tx_powers[i]) * H[i] for i in idx_jam)
@@ -1292,23 +1317,31 @@ async def generate_cfr_plot(
         bits = np.random.randint(0, 2, (N_SYMBOLS, N_SUBCARRIERS, 2))
         bits_jam = np.random.randint(0, 2, (N_SYMBOLS, N_SUBCARRIERS, 2))
         X_sig = (1 - 2 * bits[..., 0] + 1j * (1 - 2 * bits[..., 1])) / np.sqrt(2)
-        X_jam = (1 - 2 * bits_jam[..., 0] + 1j * (1 - 2 * bits_jam[..., 1])) / np.sqrt(2)
+        X_jam = (1 - 2 * bits_jam[..., 0] + 1j * (1 - 2 * bits_jam[..., 1])) / np.sqrt(
+            2
+        )
 
         Y_sig = X_sig * h_main[None, :]
         Y_int = X_jam * h_intf[None, :]
-        p_sig = np.mean(np.abs(Y_sig)**2)
-        N0 = p_sig / (10**(EBN0_dB/10) * 2) if p_sig > 0 else 1e-10
-        noise = np.sqrt(N0/2) * (np.random.randn(*Y_sig.shape) + 1j * np.random.randn(*Y_sig.shape))
+        p_sig = np.mean(np.abs(Y_sig) ** 2)
+        N0 = p_sig / (10 ** (EBN0_dB / 10) * 2) if p_sig > 0 else 1e-10
+        noise = np.sqrt(N0 / 2) * (
+            np.random.randn(*Y_sig.shape) + 1j * np.random.randn(*Y_sig.shape)
+        )
         Y_tot = Y_sig + Y_int + noise
-        
+
         # 安全處理：避免除以零
         non_zero_mask = np.abs(h_main) > 1e-10
         y_eq_no_i = np.zeros_like(Y_sig)
         y_eq_with_i = np.zeros_like(Y_tot)
-        
+
         if np.any(non_zero_mask):
-            y_eq_no_i[:, non_zero_mask] = (Y_sig + noise)[:, non_zero_mask] / h_main[None, non_zero_mask]
-            y_eq_with_i[:, non_zero_mask] = Y_tot[:, non_zero_mask] / h_main[None, non_zero_mask]
+            y_eq_no_i[:, non_zero_mask] = (Y_sig + noise)[:, non_zero_mask] / h_main[
+                None, non_zero_mask
+            ]
+            y_eq_with_i[:, non_zero_mask] = (
+                Y_tot[:, non_zero_mask] / h_main[None, non_zero_mask]
+            )
 
         # 繪製星座圖和 CFR，然後保存到文件
         logger.info("Plotting constellation and CFR")
@@ -1316,27 +1349,27 @@ async def generate_cfr_plot(
         ax[0].scatter(y_eq_no_i.real, y_eq_no_i.imag, s=4, alpha=0.25)
         ax[0].set(title="No interference", xlabel="Real", ylabel="Imag")
         ax[0].grid(True)
-        
+
         ax[1].scatter(y_eq_with_i.real, y_eq_with_i.imag, s=4, alpha=0.25)
         ax[1].set(title="With interferer", xlabel="Real", ylabel="Imag")
         ax[1].grid(True)
-        
+
         ax[2].plot(np.abs(h_main), label="|H_main|")
         ax[2].plot(np.abs(h_intf), label="|H_intf|")
         ax[2].set(title="CFR Magnitude", xlabel="Subcarrier Index")
         ax[2].legend()
         ax[2].grid(True)
-        
+
         plt.tight_layout()
-        
+
         # 確保輸出目錄存在
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
+
         # 保存圖片
         logger.info(f"Saving plot to {output_path}")
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
-        
+
         # 檢查文件是否成功生成
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             logger.info(f"Successfully saved CFR plot to {output_path}")
@@ -1344,9 +1377,285 @@ async def generate_cfr_plot(
         else:
             logger.error(f"Failed to save plot to {output_path} or file is empty")
             return False
-            
+
     except Exception as e:
         logger.exception(f"Error in generate_cfr_plot: {e}")
-        # 確保關閉任何打開的圖表
+        # 確保關閉所有打開的圖表
+        plt.close("all")
+        return False
+
+
+# 新增 SINR Map 生成函數
+async def generate_sinr_map(
+    session: AsyncSession,
+    output_path: str,
+    sinr_vmin: float = -40,
+    sinr_vmax: float = 0,
+    cell_size: float = 1.0,
+    samples_per_tx: int = 10**7,
+) -> bool:
+    """
+    生成 SINR (Signal-to-Interference-plus-Noise Ratio) 地圖
+
+    從數據庫獲取發射器和接收器設置，計算並生成 SINR 地圖
+    """
+    logger.info("開始生成 SINR 地圖...")
+
+    try:
+        # GPU 設置
+        os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+        gpus = tf.config.list_physical_devices("GPU")
+        if gpus:
+            tf.config.experimental.set_memory_growth(gpus[0], True)
+            logger.info("GPU 記憶體成長已啟用")
+        else:
+            logger.info("未找到 GPU，使用 CPU")
+
+        # 從數據庫獲取活動的發射器 (desired)
+        logger.info("從數據庫獲取活動的發射器...")
+        active_desired = await crud_device.get_devices_by_role(
+            db=session, role=DeviceRole.DESIRED.value, active_only=True
+        )
+
+        # 從數據庫獲取活動的干擾器 (jammer)
+        logger.info("從數據庫獲取活動的干擾器...")
+        active_jammers = await crud_device.get_devices_by_role(
+            db=session, role=DeviceRole.JAMMER.value, active_only=True
+        )
+
+        # 從數據庫獲取活動的接收器
+        logger.info("從數據庫獲取活動的接收器...")
+        active_receivers = await crud_device.get_devices_by_role(
+            db=session, role=DeviceRole.RECEIVER.value, active_only=True
+        )
+
+        # 檢查是否有足夠的設備
+        if not active_desired and not active_jammers:
+            logger.error("沒有活動的發射器或干擾器，無法生成 SINR 地圖")
+            return False
+
+        if not active_receivers:
+            logger.warning("沒有活動的接收器，將使用預設接收器位置")
+            rx_config = ("rx", [-30, 50, 20])
+        else:
+            # 使用第一個活動接收器
+            receiver = active_receivers[0]
+            rx_config = (
+                receiver.name,
+                [receiver.position_x, receiver.position_y, receiver.position_z],
+            )
+
+        # 構建 TX_LIST
+        tx_list = []
+
+        # 添加發射器
+        for tx in active_desired:
+            tx_name = tx.name
+            tx_position = [tx.position_x, tx.position_y, tx.position_z]
+            tx_orientation = [tx.orientation_x, tx.orientation_y, tx.orientation_z]
+            tx_power = tx.power_dbm
+
+            tx_list.append((tx_name, tx_position, tx_orientation, "desired", tx_power))
+            logger.info(
+                f"添加發射器: {tx_name}, 位置: {tx_position}, 方向: {tx_orientation}, 功率: {tx_power} dBm"
+            )
+
+        # 添加干擾器
+        for jammer in active_jammers:
+            jammer_name = jammer.name
+            jammer_position = [jammer.position_x, jammer.position_y, jammer.position_z]
+            jammer_orientation = [
+                jammer.orientation_x,
+                jammer.orientation_y,
+                jammer.orientation_z,
+            ]
+            jammer_power = jammer.power_dbm
+
+            tx_list.append(
+                (
+                    jammer_name,
+                    jammer_position,
+                    jammer_orientation,
+                    "jammer",
+                    jammer_power,
+                )
+            )
+            logger.info(
+                f"添加干擾器: {jammer_name}, 位置: {jammer_position}, 方向: {jammer_orientation}, 功率: {jammer_power} dBm"
+            )
+
+        # 如果沒有足夠的發射器，返回錯誤
+        if not tx_list:
+            logger.error("沒有可用的發射器或干擾器，無法生成 SINR 地圖")
+            return False
+
+        # 參數設置
+        scene_name = str(NYCU_XML_PATH)
+        logger.info(f"從 {scene_name} 加載場景")
+
+        tx_array_config = {
+            "num_rows": 1,
+            "num_cols": 1,
+            "vertical_spacing": 0.5,
+            "horizontal_spacing": 0.5,
+            "pattern": "iso",
+            "polarization": "V",
+        }
+        rx_array_config = tx_array_config
+
+        rmsolver_args = {
+            "max_depth": 10,
+            "cell_size": (cell_size, cell_size),
+            "samples_per_tx": samples_per_tx,
+        }
+
+        # 場景設置
+        logger.info("設置場景")
+        scene = load_scene(scene_name)
+        scene.tx_array = PlanarArray(**tx_array_config)
+        scene.rx_array = PlanarArray(**rx_array_config)
+
+        # 清除現有的發射器和接收器
+        for name in list(scene.transmitters.keys()) + list(scene.receivers.keys()):
+            scene.remove(name)
+
+        # 添加發射器
+        logger.info("添加發射器")
+
+        def add_tx(scene, name, pos, ori, role, power_dbm):
+            tx = SionnaTransmitter(
+                name=name, position=pos, orientation=ori, power_dbm=power_dbm
+            )
+            tx.role = role
+            scene.add(tx)
+            return tx
+
+        for name, pos, ori, role, p_dbm in tx_list:
+            add_tx(scene, name, pos, ori, role, p_dbm)
+
+        # 添加接收器
+        rx_name, rx_pos = rx_config
+        logger.info(f"添加接收器 '{rx_name}' 在位置 {rx_pos}")
+        scene.add(SionnaReceiver(name=rx_name, position=rx_pos))
+
+        # 按角色分組發射器
+        all_txs = [scene.get(n) for n in scene.transmitters]
+        idx_des = [
+            i for i, tx in enumerate(all_txs) if getattr(tx, "role", None) == "desired"
+        ]
+        idx_jam = [
+            i for i, tx in enumerate(all_txs) if getattr(tx, "role", None) == "jammer"
+        ]
+
+        if not idx_des and not idx_jam:
+            logger.error("場景中沒有有效的發射器或干擾器")
+            return False
+
+        # 計算無線電地圖
+        logger.info("計算無線電地圖")
+        rm_solver = RadioMapSolver()
+        rm = rm_solver(scene, **rmsolver_args)
+
+        # 計算並繪製 SINR 地圖
+        logger.info("計算 SINR 地圖")
+        cc = rm.cell_centers.numpy()
+        x_unique = cc[0, :, 0]
+        y_unique = cc[:, 0, 1]
+        rss_list = [rm.rss[i].numpy() for i in range(len(all_txs))]
+
+        # 計算 SINR
+        N0_map = 1e-12  # 噪聲功率
+
+        # 檢查是否有目標發射器和干擾器
+        if idx_des:
+            rss_des = sum(rss_list[i] for i in idx_des)
+        else:
+            logger.warning("沒有目標發射器，將假設沒有信號")
+            rss_des = (
+                np.zeros_like(rss_list[0])
+                if rss_list
+                else np.zeros((len(y_unique), len(x_unique)))
+            )
+
+        if idx_jam:
+            rss_jam = sum(rss_list[i] for i in idx_jam)
+        else:
+            logger.warning("沒有干擾器，將假設沒有干擾")
+            rss_jam = (
+                np.zeros_like(rss_list[0])
+                if rss_list
+                else np.zeros((len(y_unique), len(x_unique)))
+            )
+
+        # 計算 SINR (dB)，確保公式與原始 sinr.py 一致
+        sinr_db = 10 * np.log10(
+            np.clip(rss_des / (rss_des + rss_jam + N0_map), 1e-12, None)
+        )
+
+        # 繪製地圖
+        logger.info("繪製 SINR 地圖")
+        fig, ax = plt.subplots(figsize=(7, 5))
+        X, Y = np.meshgrid(x_unique, y_unique)
+        pcm = ax.pcolormesh(
+            X, Y, sinr_db, shading="nearest", vmin=sinr_vmin + 10, vmax=sinr_vmax
+        )
+        fig.colorbar(pcm, ax=ax, label="SINR (dB)")
+
+        # 繪製發射器和接收器
+        ax.scatter(
+            [t.position[0] for t in all_txs if getattr(t, "role", None) == "desired"],
+            [t.position[1] for t in all_txs if getattr(t, "role", None) == "desired"],
+            c="red",
+            marker="^",
+            s=100,
+            label="Tx",
+        )
+        ax.scatter(
+            [t.position[0] for t in all_txs if getattr(t, "role", None) == "jammer"],
+            [t.position[1] for t in all_txs if getattr(t, "role", None) == "jammer"],
+            c="red",
+            marker="x",
+            s=100,
+            label="Jam",
+        )
+
+        # 獲取接收器
+        rx_object = scene.get(rx_name)
+        if rx_object:
+            ax.scatter(
+                rx_object.position[0],
+                rx_object.position[1],
+                c="green",
+                marker="o",
+                s=50,
+                label="Rx",
+            )
+
+        ax.legend()
+        ax.set_xlabel("x (m)")
+        ax.set_ylabel("y (m)")
+        ax.set_title("SINR Map")
+        ax.invert_yaxis()
+        plt.tight_layout()
+
+        # 確保輸出目錄存在
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        # 保存圖片
+        logger.info(f"保存 SINR 地圖到 {output_path}")
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+        # 檢查文件是否生成成功
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.info(f"成功保存 SINR 地圖到 {output_path}")
+            return True
+        else:
+            logger.error(f"保存 SINR 地圖到 {output_path} 失敗或文件為空")
+            return False
+
+    except Exception as e:
+        logger.exception(f"Error in generate_sinr_map: {e}")
+        # 確保關閉所有打開的圖表
         plt.close("all")
         return False

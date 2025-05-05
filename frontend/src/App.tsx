@@ -658,7 +658,24 @@ function App() {
                 <Layout
                     sidebar={
                         <Sidebar
-                            devices={tempDevices}
+                            devices={[...tempDevices].sort((a, b) => {
+                                // 定義角色排序優先級
+                                const roleOrder: { [key: string]: number } = {
+                                    receiver: 1,
+                                    desired: 2,
+                                    jammer: 3,
+                                }
+                                const roleA = roleOrder[a.role] || 99
+                                const roleB = roleOrder[b.role] || 99
+
+                                // 首先按角色排序
+                                if (roleA !== roleB) {
+                                    return roleA - roleB
+                                }
+
+                                // 如果角色相同，則按名稱排序
+                                return a.name.localeCompare(b.name)
+                            })}
                             onDeviceChange={handleDeviceChange}
                             onDeleteDevice={handleDeleteDevice}
                             onAddDevice={handleAddDevice}

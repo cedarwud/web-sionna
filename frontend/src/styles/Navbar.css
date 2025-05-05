@@ -301,28 +301,56 @@
 
 /* 新增CFR圖表控制元素的樣式 */
 .image-controls {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 15px;
-  padding: 5px 10px;
+  margin-bottom: 20px;
+  padding: 10px;
   background-color: #f5f5f5;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.control-group {
+  display: flex;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.image-controls label {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  gap: 8px;
+}
+
+.image-controls input[type="number"] {
+  width: 80px;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
   border-radius: 4px;
+}
+
+.image-controls select {
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: white;
 }
 
 .refresh-button {
   padding: 8px 16px;
-  background-color: #4a6cf7;
+  background-color: #4285f4;
   color: white;
   border: none;
   border-radius: 4px;
   cursor: pointer;
   font-weight: 500;
   transition: background-color 0.2s;
+  align-self: flex-start;
 }
 
 .refresh-button:hover {
-  background-color: #3a57d7;
+  background-color: #3367d6;
 }
 
 .refresh-button:disabled {
@@ -331,30 +359,31 @@
 }
 
 .last-update {
-  font-size: 0.9rem;
-  color: #555;
-  font-style: italic;
-}
-
-/* 確保圖像在容器中正確顯示 */
-.view-image {
-  max-width: 100%;
-  border-radius: 4px;
-  box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
-}
-
-/* 載入和錯誤訊息樣式 */
-.loading, .error {
-  padding: 20px;
-  text-align: center;
+  font-size: 12px;
+  color: #666;
+  margin-top: 5px;
 }
 
 .loading {
-  color: #4a6cf7;
+  text-align: center;
+  padding: 20px;
+  font-style: italic;
+  color: #666;
 }
 
 .error {
-  color: #e74c3c;
-  background-color: #ffeeee;
+  text-align: center;
+  padding: 20px;
+  color: #d32f2f;
+  background-color: #ffebee;
   border-radius: 4px;
+  margin-bottom: 15px;
+}
+
+.view-image {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 } 

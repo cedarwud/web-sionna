@@ -59,6 +59,7 @@ SCENE_WITH_PATHS_IMAGE_PATH = OUTPUT_DIR / "scene_with_paths.png"
 CONSTELLATION_IMAGE_PATH = OUTPUT_DIR / "constellation_diagram.png"
 EMPTY_SCENE_IMAGE_PATH = OUTPUT_DIR / "empty_scene.png"
 CFR_PLOT_IMAGE_PATH = OUTPUT_DIR / "cfr_plot.png"  # 新增: CFR 圖像路徑
+SINR_MAP_IMAGE_PATH = OUTPUT_DIR / "sinr_map.png"  # 新增: SINR 地圖路徑
 
 # logger.info(f"Project Root (estimated): {PROJECT_ROOT}") # 不再需要
 logger.info(f"Static Directory (in container): {STATIC_DIR}")
@@ -66,13 +67,20 @@ logger.info(f"Models Directory (in container): {MODELS_DIR}")
 logger.info(f"Static Images Directory (in container): {STATIC_IMAGES_DIR}")
 logger.info(f"NYCU Directory (in container): {NYCU_DIR}")  # 新增: 記錄 NYCU 目錄
 logger.info(f"NYCU GLB Path (in container): {NYCU_GLB_PATH}")
-logger.info(f"NYCU XML Path (in container): {NYCU_XML_PATH}")  # 新增: 記錄 NYCU.xml 路徑
+logger.info(
+    f"NYCU XML Path (in container): {NYCU_XML_PATH}"
+)  # 新增: 記錄 NYCU.xml 路徑
 logger.info(f"Default GLB Path (in container): {GLB_PATH}")
 logger.info(
     f"Scene with Paths Image Path (in container): {SCENE_WITH_PATHS_IMAGE_PATH}"
 )
 logger.info(f"Constellation Image Path (in container): {CONSTELLATION_IMAGE_PATH}")
-logger.info(f"CFR Plot Image Path (in container): {CFR_PLOT_IMAGE_PATH}")  # 新增: 記錄 CFR 圖像路徑
+logger.info(
+    f"CFR Plot Image Path (in container): {CFR_PLOT_IMAGE_PATH}"
+)  # 新增: 記錄 CFR 圖像路徑
+logger.info(
+    f"SINR Map Image Path (in container): {SINR_MAP_IMAGE_PATH}"
+)  # 新增: 記錄 SINR 地圖路徑
 
 
 # --- GPU/CPU Configuration ---
