@@ -1096,7 +1096,7 @@ async def generate_cfr_plot(
     生成 Channel Frequency Response (CFR) 圖，基於 Sionna 的模擬。
     這是從 cfr.py 整合的功能。
     
-    現在會從資料庫中獲取接收器 (receiver) 參數。
+    從資料庫中獲取接收器 (receiver)、發射器 (desired) 和干擾器 (jammer) 參數。
     """
     logger.info("Entering generate_cfr_plot function...")
     
@@ -1129,7 +1129,61 @@ async def generate_cfr_plot(
             rx_name = receiver.name
             rx_position = [receiver.position_x, receiver.position_y, receiver.position_z]
             logger.info(f"Using receiver '{rx_name}' with position {rx_position}")
-
+        
+        # 從資料庫獲取活動的發射器 (desired)
+        logger.info("Fetching active desired transmitters from database...")
+        active_desired = await crud_device.get_devices_by_role(
+            db=session,
+            role=DeviceRole.DESIRED.value,
+            active_only=True
+        )
+        
+        # 從資料庫獲取活動的干擾器 (jammer)
+        logger.info("Fetching active jammers from database...")
+        active_jammers = await crud_device.get_devices_by_role(
+            db=session,
+            role=DeviceRole.JAMMER.value,
+            active_only=True
+        )
+        
+        # 構建 TX_LIST (發射器和干擾器列表)
+        TX_LIST = []
+        
+        # 添加發射器
+        if not active_desired:
+            logger.warning("No active desired transmitters found in database. Simulation might not be meaningful.")
+            # 添加默認的發射器參數 # REMOVED
+        else:
+            # 添加從資料庫獲取的發射器
+            for i, tx in enumerate(active_desired):
+                tx_name = tx.name
+                tx_position = [tx.position_x, tx.position_y, tx.position_z]
+                tx_orientation = [tx.orientation_x, tx.orientation_y, tx.orientation_z]
+                tx_power = tx.power_dbm
+                
+                TX_LIST.append((tx_name, tx_position, tx_orientation, "desired", tx_power))
+                logger.info(f"Added desired transmitter: {tx_name}, position: {tx_position}, orientation: {tx_orientation}, power: {tx_power} dBm")
+        
+        # 添加干擾器
+        if not active_jammers:
+            logger.warning("No active jammers found in database. Interference simulation will not run.")
+            # 添加默認的干擾器參數 # REMOVED
+        else:
+            # 添加從資料庫獲取的干擾器
+            for i, jammer in enumerate(active_jammers):
+                jammer_name = jammer.name
+                jammer_position = [jammer.position_x, jammer.position_y, jammer.position_z]
+                jammer_orientation = [jammer.orientation_x, jammer.orientation_y, jammer.orientation_z]
+                jammer_power = jammer.power_dbm
+                
+                TX_LIST.append((jammer_name, jammer_position, jammer_orientation, "jammer", jammer_power))
+                logger.info(f"Added jammer: {jammer_name}, position: {jammer_position}, orientation: {jammer_orientation}, power: {jammer_power} dBm")
+        
+        # 檢查是否有足夠的發射器和干擾器
+        if not TX_LIST:
+            logger.error("No transmitters or jammers available for simulation. Cannot proceed.")
+            return False
+        
         # 參數設置
         SCENE_NAME = str(NYCU_XML_PATH)
         logger.info(f"Loading scene from: {SCENE_NAME}")
@@ -1143,15 +1197,6 @@ async def generate_cfr_plot(
             "polarization": "V"
         }
         RX_ARRAY_CONFIG = TX_ARRAY_CONFIG
-        
-        TX_LIST = [
-            ("tx0", [-100, -100, 20], [2.6179938779914944, 0, 0], "desired", 30),
-            ("tx1", [-100, 50, 20], [0.5235987755982988, 0, 0], "desired", 30),
-            ("tx2", [100, -100, 20], [-1.5707963267948966, 0, 0], "desired", 30),
-            ("jam1", [100, 50, 20], [1.5707963267948966, 0, 0], "jammer", 40),
-            ("jam2", [50, 50, 20], [1.5707963267948966, 0, 0], "jammer", 40),
-            ("jam3", [-50, -50, 20], [1.5707963267948966, 0, 0], "jammer", 40),
-        ]
         
         # 使用從資料庫獲取的接收器參數
         RX_CONFIG = (rx_name, rx_position)
@@ -1202,6 +1247,12 @@ async def generate_cfr_plot(
         all_txs = [scene.get(n) for n in tx_names]
         idx_des = [i for i, tx in enumerate(all_txs) if tx.role == "desired"]
         idx_jam = [i for i, tx in enumerate(all_txs) if tx.role == "jammer"]
+        
+        # 檢查是否有發射器和干擾器
+        if not idx_des:
+            logger.warning("No desired transmitters available in scene. CFR calculation may not be accurate.")
+        if not idx_jam:
+            logger.warning("No jammers available in scene. Interference will not be present in plot.")
 
         # 計算 CFR
         logger.info("Computing CFR")
@@ -1226,8 +1277,15 @@ async def generate_cfr_plot(
 
         H_all = np.sqrt(np.array(tx_powers)[:, None, None]) * H_unit
         H = H_unit[:, 0, :]  # 取第一個時間步
-        h_main = sum(np.sqrt(tx_powers[i]) * H[i] for i in idx_des)
-        h_intf = sum(np.sqrt(tx_powers[i]) * H[i] for i in idx_jam)
+        
+        # 安全處理：確保有所需的發射器
+        h_main = np.zeros(N_SUBCARRIERS, dtype=complex)
+        if idx_des:
+            h_main = sum(np.sqrt(tx_powers[i]) * H[i] for i in idx_des)
+        
+        h_intf = np.zeros(N_SUBCARRIERS, dtype=complex)
+        if idx_jam:
+            h_intf = sum(np.sqrt(tx_powers[i]) * H[i] for i in idx_jam)
 
         # 生成 QPSK+OFDM 符號
         logger.info("Generating QPSK+OFDM symbols")
@@ -1239,11 +1297,18 @@ async def generate_cfr_plot(
         Y_sig = X_sig * h_main[None, :]
         Y_int = X_jam * h_intf[None, :]
         p_sig = np.mean(np.abs(Y_sig)**2)
-        N0 = p_sig / (10**(EBN0_dB/10) * 2)
+        N0 = p_sig / (10**(EBN0_dB/10) * 2) if p_sig > 0 else 1e-10
         noise = np.sqrt(N0/2) * (np.random.randn(*Y_sig.shape) + 1j * np.random.randn(*Y_sig.shape))
         Y_tot = Y_sig + Y_int + noise
-        y_eq_no_i = (Y_sig + noise) / h_main
-        y_eq_with_i = Y_tot / h_main
+        
+        # 安全處理：避免除以零
+        non_zero_mask = np.abs(h_main) > 1e-10
+        y_eq_no_i = np.zeros_like(Y_sig)
+        y_eq_with_i = np.zeros_like(Y_tot)
+        
+        if np.any(non_zero_mask):
+            y_eq_no_i[:, non_zero_mask] = (Y_sig + noise)[:, non_zero_mask] / h_main[None, non_zero_mask]
+            y_eq_with_i[:, non_zero_mask] = Y_tot[:, non_zero_mask] / h_main[None, non_zero_mask]
 
         # 繪製星座圖和 CFR，然後保存到文件
         logger.info("Plotting constellation and CFR")
