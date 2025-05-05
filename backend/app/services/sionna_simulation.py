@@ -13,6 +13,7 @@ from sionna.rt import (
     Receiver as SionnaReceiver,
     PlanarArray,
     PathSolver,
+    subcarrier_frequencies,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -20,7 +21,7 @@ import collections.abc  # Import for checking iterable
 
 # Import models and config from their new locations
 from app.db.models import Device, DeviceRole
-from app.core.config import OUTPUT_DIR
+from app.core.config import OUTPUT_DIR, NYCU_XML_PATH, CFR_PLOT_IMAGE_PATH
 from app.crud import crud_device  # 導入整合後的 crud_device 模塊
 
 # 新增導入 for GLB rendering
@@ -28,6 +29,7 @@ import trimesh
 import pyrender
 from PIL import Image
 import io
+import tensorflow as tf
 
 # 從 config 導入
 from app.core.config import NYCU_GLB_PATH, OUTPUT_DIR  # 確保導入 NYCU_GLB_PATH
@@ -1082,4 +1084,168 @@ async def generate_scene_with_devices_image(
         return False
     except Exception as e:
         logger.error(f"Error in generate_scene_with_devices_image: {e}", exc_info=True)
+        return False
+
+
+# 新增函數: generate_cfr_plot
+async def generate_cfr_plot(output_path: str = str(CFR_PLOT_IMAGE_PATH)) -> bool:
+    """
+    生成 Channel Frequency Response (CFR) 圖，基於 Sionna 的模擬。
+    這是從 cfr.py 整合的功能。
+    """
+    logger.info("Entering generate_cfr_plot function...")
+    
+    try:
+        # 參數設置
+        SCENE_NAME = str(NYCU_XML_PATH)
+        logger.info(f"Loading scene from: {SCENE_NAME}")
+        
+        TX_ARRAY_CONFIG = {
+            "num_rows": 1, 
+            "num_cols": 1, 
+            "vertical_spacing": 0.5, 
+            "horizontal_spacing": 0.5, 
+            "pattern": "iso", 
+            "polarization": "V"
+        }
+        RX_ARRAY_CONFIG = TX_ARRAY_CONFIG
+        
+        TX_LIST = [
+            ("tx0", [-100, -100, 20], [2.6179938779914944, 0, 0], "desired", 30),
+            ("tx1", [-100, 50, 20], [0.5235987755982988, 0, 0], "desired", 30),
+            ("tx2", [100, -100, 20], [-1.5707963267948966, 0, 0], "desired", 30),
+            ("jam1", [100, 50, 20], [1.5707963267948966, 0, 0], "jammer", 40),
+            ("jam2", [50, 50, 20], [1.5707963267948966, 0, 0], "jammer", 40),
+            ("jam3", [-50, -50, 20], [1.5707963267948966, 0, 0], "jammer", 40),
+        ]
+        
+        RX_CONFIG = ("rx", [0, 0, 20])
+        PATHSOLVER_ARGS = {
+            "max_depth": 10, 
+            "los": True, 
+            "specular_reflection": True, 
+            "diffuse_reflection": False, 
+            "refraction": False, 
+            "synthetic_array": False, 
+            "seed": 41
+        }
+        
+        N_SYMBOLS = 1
+        N_SUBCARRIERS = 1024
+        SUBCARRIER_SPACING = 30e3
+        EBN0_dB = 20.0
+
+        # 場景設置
+        logger.info("Setting up scene")
+        scene = load_scene(SCENE_NAME)
+        scene.tx_array = PlanarArray(**TX_ARRAY_CONFIG)
+        scene.rx_array = PlanarArray(**RX_ARRAY_CONFIG)
+
+        # 清除現有的發射器和接收器
+        for name in list(scene.transmitters.keys()) + list(scene.receivers.keys()):
+            scene.remove(name)
+
+        # 添加發射器
+        logger.info("Adding transmitters")
+        def add_tx(scene, name, pos, ori, role, power_dbm):
+            tx = SionnaTransmitter(name=name, position=pos, orientation=ori, power_dbm=power_dbm)
+            tx.role = role
+            scene.add(tx)
+            return tx
+
+        for name, pos, ori, role, p_dbm in TX_LIST:
+            add_tx(scene, name, pos, ori, role, p_dbm)
+
+        # 添加接收器
+        logger.info("Adding receiver")
+        rx_name, rx_pos = RX_CONFIG
+        scene.add(SionnaReceiver(name=rx_name, position=rx_pos))
+
+        # 分組發射器
+        tx_names = list(scene.transmitters.keys())
+        all_txs = [scene.get(n) for n in tx_names]
+        idx_des = [i for i, tx in enumerate(all_txs) if tx.role == "desired"]
+        idx_jam = [i for i, tx in enumerate(all_txs) if tx.role == "jammer"]
+
+        # 計算 CFR
+        logger.info("Computing CFR")
+        freqs = subcarrier_frequencies(N_SUBCARRIERS, SUBCARRIER_SPACING)
+        for name in tx_names:
+            scene.get(name).velocity = [30, 0, 0]
+        paths = PathSolver()(scene, **PATHSOLVER_ARGS)
+
+        def dbm2w(dbm):
+            return 10**(dbm/10) / 1000
+
+        tx_powers = [dbm2w(scene.get(n).power_dbm) for n in tx_names]
+        ofdm_symbol_duration = 1 / SUBCARRIER_SPACING
+        H_unit = paths.cfr(
+            frequencies=freqs,
+            sampling_frequency=1/ofdm_symbol_duration,
+            num_time_steps=N_SUBCARRIERS,
+            normalize_delays=True,
+            normalize=False,
+            out_type="numpy"
+        ).squeeze()  # shape: (num_tx, T, F)
+
+        H_all = np.sqrt(np.array(tx_powers)[:, None, None]) * H_unit
+        H = H_unit[:, 0, :]  # 取第一個時間步
+        h_main = sum(np.sqrt(tx_powers[i]) * H[i] for i in idx_des)
+        h_intf = sum(np.sqrt(tx_powers[i]) * H[i] for i in idx_jam)
+
+        # 生成 QPSK+OFDM 符號
+        logger.info("Generating QPSK+OFDM symbols")
+        bits = np.random.randint(0, 2, (N_SYMBOLS, N_SUBCARRIERS, 2))
+        bits_jam = np.random.randint(0, 2, (N_SYMBOLS, N_SUBCARRIERS, 2))
+        X_sig = (1 - 2 * bits[..., 0] + 1j * (1 - 2 * bits[..., 1])) / np.sqrt(2)
+        X_jam = (1 - 2 * bits_jam[..., 0] + 1j * (1 - 2 * bits_jam[..., 1])) / np.sqrt(2)
+
+        Y_sig = X_sig * h_main[None, :]
+        Y_int = X_jam * h_intf[None, :]
+        p_sig = np.mean(np.abs(Y_sig)**2)
+        N0 = p_sig / (10**(EBN0_dB/10) * 2)
+        noise = np.sqrt(N0/2) * (np.random.randn(*Y_sig.shape) + 1j * np.random.randn(*Y_sig.shape))
+        Y_tot = Y_sig + Y_int + noise
+        y_eq_no_i = (Y_sig + noise) / h_main
+        y_eq_with_i = Y_tot / h_main
+
+        # 繪製星座圖和 CFR，然後保存到文件
+        logger.info("Plotting constellation and CFR")
+        fig, ax = plt.subplots(1, 3, figsize=(15, 4))
+        ax[0].scatter(y_eq_no_i.real, y_eq_no_i.imag, s=4, alpha=0.25)
+        ax[0].set(title="No interference", xlabel="Real", ylabel="Imag")
+        ax[0].grid(True)
+        
+        ax[1].scatter(y_eq_with_i.real, y_eq_with_i.imag, s=4, alpha=0.25)
+        ax[1].set(title="With interferer", xlabel="Real", ylabel="Imag")
+        ax[1].grid(True)
+        
+        ax[2].plot(np.abs(h_main), label="|H_main|")
+        ax[2].plot(np.abs(h_intf), label="|H_intf|")
+        ax[2].set(title="CFR Magnitude", xlabel="Subcarrier Index")
+        ax[2].legend()
+        ax[2].grid(True)
+        
+        plt.tight_layout()
+        
+        # 確保輸出目錄存在
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        # 保存圖片
+        logger.info(f"Saving plot to {output_path}")
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        
+        # 檢查文件是否成功生成
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.info(f"Successfully saved CFR plot to {output_path}")
+            return True
+        else:
+            logger.error(f"Failed to save plot to {output_path} or file is empty")
+            return False
+            
+    except Exception as e:
+        logger.exception(f"Error in generate_cfr_plot: {e}")
+        # 確保關閉任何打開的圖表
+        plt.close("all")
         return False

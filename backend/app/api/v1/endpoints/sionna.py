@@ -18,12 +18,14 @@ from app.services.sionna_simulation import (  # Import service functions
     add_to_scene_safe,
     generate_empty_scene_image,
     generate_scene_with_devices_image,  # 新增的函數
+    generate_cfr_plot,  # 新增: 導入剛添加的 CFR 繪圖函數
 )
 from app.core.config import (  # Import constants
     SCENE_WITH_PATHS_IMAGE_PATH,
     CONSTELLATION_IMAGE_PATH,
     STATIC_IMAGES_DIR,
     MODELS_DIR,
+    CFR_PLOT_IMAGE_PATH,  # 新增: 導入 CFR 圖片路徑
 )
 
 # 新增: 導入 run_in_threadpool
@@ -1216,3 +1218,41 @@ async def trigger_generate_scene_image(
     except Exception as e:
         logger.exception(f"呼叫 generate_empty_scene_image 時發生未預期錯誤: {e}")
         raise HTTPException(status_code=500, detail=f"伺服器內部錯誤: {str(e)}")
+
+
+@router.get("/cfr-plot", tags=["Sionna Simulation"])
+async def get_cfr_plot_endpoint():
+    """生成並返回 Channel Frequency Response (CFR) 圖，基於 Sionna 的模擬。"""
+    logger.info("--- API Request: /cfr-plot ---")
+    
+    # 使用 run_in_threadpool 執行同步函數，避免阻塞
+    if await generate_cfr_plot(str(CFR_PLOT_IMAGE_PATH)):
+        if os.path.exists(CFR_PLOT_IMAGE_PATH):
+            file_size = os.path.getsize(CFR_PLOT_IMAGE_PATH)
+            logger.info(f"返回 CFR 圖像，文件路徑: {CFR_PLOT_IMAGE_PATH} (大小: {file_size} 字節)")
+            
+            # 使用 StreamingResponse 從文件流直接返回
+            def iterfile():
+                with open(CFR_PLOT_IMAGE_PATH, "rb") as f:
+                    # 每次讀取 4KB
+                    chunk = f.read(4096)
+                    while chunk:
+                        yield chunk
+                        chunk = f.read(4096)
+            
+            return StreamingResponse(
+                iterfile(),
+                media_type="image/png",
+                headers={
+                    "Content-Disposition": f"attachment; filename=cfr_plot.png"
+                },
+            )
+        else:
+            logger.error(f"生成後找不到文件: {CFR_PLOT_IMAGE_PATH}")
+            raise HTTPException(
+                status_code=500,
+                detail="生成 CFR 圖後找不到文件。",
+            )
+    else:
+        logger.error("生成 CFR 圖失敗。")
+        raise HTTPException(status_code=500, detail="生成 CFR 圖失敗。")

@@ -38,15 +38,18 @@ APP_DIR = CORE_DIR.parent  # /app/app
 STATIC_DIR = APP_DIR / "static"  # Correct path: /app/app/static
 MODELS_DIR = STATIC_DIR / "models"  # Correct path: /app/app/static/models
 STATIC_IMAGES_DIR = STATIC_DIR / "images"  # Correct path: /app/app/static/images
+NYCU_DIR = STATIC_DIR / "NYCU"  # 新增: NYCU 目錄路徑
 
 # 建立目錄
 # STATIC_DIR.mkdir(parents=True, exist_ok=True) # 目錄應該由 volume mount 提供，不需在 config 創建
 MODELS_DIR.mkdir(parents=True, exist_ok=True)  # 但確保子目錄存在是好的
 STATIC_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+NYCU_DIR.mkdir(parents=True, exist_ok=True)  # 新增: 確保 NYCU 目錄存在
 
-# 定義 GLB 路徑 (基於修正後的 MODELS_DIR)
+# 定義 GLB 和 XML 路徑 (基於修正後的 MODELS_DIR 和 NYCU_DIR)
 NYCU_GLB_PATH = MODELS_DIR / "NYCU.glb"
 GLB_PATH = MODELS_DIR / "scene.glb"
+NYCU_XML_PATH = NYCU_DIR / "NYCU.xml"  # 新增: NYCU.xml 文件路徑
 
 # 舊版 OUTPUT_DIR，保持定義以兼容可能還在使用的地方，但指向新位置
 OUTPUT_DIR = STATIC_IMAGES_DIR
@@ -55,17 +58,21 @@ OUTPUT_DIR = STATIC_IMAGES_DIR
 SCENE_WITH_PATHS_IMAGE_PATH = OUTPUT_DIR / "scene_with_paths.png"
 CONSTELLATION_IMAGE_PATH = OUTPUT_DIR / "constellation_diagram.png"
 EMPTY_SCENE_IMAGE_PATH = OUTPUT_DIR / "empty_scene.png"
+CFR_PLOT_IMAGE_PATH = OUTPUT_DIR / "cfr_plot.png"  # 新增: CFR 圖像路徑
 
 # logger.info(f"Project Root (estimated): {PROJECT_ROOT}") # 不再需要
 logger.info(f"Static Directory (in container): {STATIC_DIR}")
 logger.info(f"Models Directory (in container): {MODELS_DIR}")
 logger.info(f"Static Images Directory (in container): {STATIC_IMAGES_DIR}")
+logger.info(f"NYCU Directory (in container): {NYCU_DIR}")  # 新增: 記錄 NYCU 目錄
 logger.info(f"NYCU GLB Path (in container): {NYCU_GLB_PATH}")
+logger.info(f"NYCU XML Path (in container): {NYCU_XML_PATH}")  # 新增: 記錄 NYCU.xml 路徑
 logger.info(f"Default GLB Path (in container): {GLB_PATH}")
 logger.info(
     f"Scene with Paths Image Path (in container): {SCENE_WITH_PATHS_IMAGE_PATH}"
 )
 logger.info(f"Constellation Image Path (in container): {CONSTELLATION_IMAGE_PATH}")
+logger.info(f"CFR Plot Image Path (in container): {CFR_PLOT_IMAGE_PATH}")  # 新增: 記錄 CFR 圖像路徑
 
 
 # --- GPU/CPU Configuration ---
