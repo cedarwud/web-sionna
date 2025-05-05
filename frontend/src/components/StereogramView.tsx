@@ -856,7 +856,7 @@ function Etoile({
                             device.position_z + 5,
                             device.position_y,
                         ]}
-                        scale={[0.008, 0.008, 0.008]}
+                        scale={[0.005, 0.005, 0.005]}
                     />
                 )
             } else {
