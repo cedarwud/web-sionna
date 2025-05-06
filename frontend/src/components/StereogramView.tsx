@@ -910,6 +910,36 @@ interface SceneViewProps {
     onUAVPositionUpdate?: (position: [number, number, number]) => void
 }
 
+// 星空星點數量
+const STAR_COUNT = 180
+
+// 定義星點型別
+interface Star {
+    left: number
+    top: number
+    size: number
+    baseOpacity: number
+    phase: number
+    speed: number
+    animOpacity: number
+}
+
+// 產生星點初始資料（只在初始渲染時產生一次）
+function createStars(): Star[] {
+    return Array.from({ length: STAR_COUNT }, () => {
+        const baseOpacity = Math.random() * 0.7 + 0.3
+        return {
+            left: Math.random() * 100,
+            top: Math.random() * 100,
+            size: Math.random() * 2 + 1,
+            baseOpacity,
+            phase: Math.random() * Math.PI * 2,
+            speed: Math.random() * 1.0 + 1.0, // 閃爍速度 1.0~2.0
+            animOpacity: baseOpacity,
+        }
+    })
+}
+
 export default function SceneView({
     devices = [],
     auto,
@@ -917,20 +947,83 @@ export default function SceneView({
     onManualControl,
     onUAVPositionUpdate,
 }: SceneViewProps) {
+    // 星空動畫狀態
+    const [starAnim, setStarAnim] = useState(() => createStars())
+
+    // 輕微閃爍動畫：每 60ms 更新一次透明度
+    useEffect(() => {
+        let mounted = true
+        let frame = 0
+        const interval = setInterval(() => {
+            if (!mounted) return
+            setStarAnim((prev) =>
+                prev.map((star, i) => {
+                    // 用 baseOpacity 為中心，sin 波動幅度 0.5，速度不同
+                    const t = frame / 30 // 時間參數
+                    const flicker = Math.sin(t * star.speed + star.phase) * 0.5
+                    let opacity = star.baseOpacity + flicker
+                    // 限制在 0.15~1.0 之間
+                    opacity = Math.max(0.15, Math.min(1, opacity))
+                    return { ...star, animOpacity: opacity }
+                })
+            )
+            frame++
+        }, 60)
+        return () => {
+            mounted = false
+            clearInterval(interval)
+        }
+    }, [])
+
     return (
         <div
             className="scene-container"
-            style={{ width: '100%', height: '100%' }}
+            style={{
+                width: '100%',
+                height: '100%',
+                position: 'relative',
+                background:
+                    'radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%)',
+                overflow: 'hidden',
+            }}
         >
-            <Canvas
-                shadows
-                camera={{ position: [0, 600, 0], near: 0.1, far: 1e4 }}
-                gl={{
-                    toneMapping: THREE.ACESFilmicToneMapping,
-                    toneMappingExposure: 1.2, // 增強整體光照效果 -> 調低整體亮度
+            {/* 星空星點層（在最底層，不影響互動） */}
+            <div
+                style={{
+                    position: 'absolute',
+                    inset: 0,
+                    zIndex: 0,
+                    pointerEvents: 'none',
                 }}
             >
-                <color attach="background" args={['#7f7f7f']} />
+                {starAnim.map((star, i) => (
+                    <div
+                        key={i}
+                        style={{
+                            position: 'absolute',
+                            left: `${star.left}%`,
+                            top: `${star.top}%`,
+                            width: `${star.size}px`,
+                            height: `${star.size}px`,
+                            borderRadius: '50%',
+                            background: 'white',
+                            opacity: star.animOpacity ?? star.baseOpacity,
+                            filter: 'blur(0.5px)',
+                            transition: 'opacity 0.2s linear',
+                        }}
+                    />
+                ))}
+            </div>
+            {/* 3D Canvas內容照舊，會蓋在星空上 */}
+            <Canvas
+                shadows
+                camera={{ position: [40, 70, 100], near: 0.1, far: 1e4 }}
+                gl={{
+                    toneMapping: THREE.ACESFilmicToneMapping,
+                    toneMappingExposure: 1.2,
+                    alpha: true,
+                }}
+            >
                 <hemisphereLight args={[0xffffff, 0x444444, 1.0]} />
                 <ambientLight intensity={0.2} />
                 <directionalLight

@@ -39,6 +39,36 @@ interface NewDevice {
 // 定義靜態路徑指向後端存儲的最後一次成功渲染的圖像
 const FALLBACK_IMAGE_PATH = '/rendered_images/scene_with_devices.png'
 
+// 星空星點數量
+const STAR_COUNT = 180
+
+// 定義星點型別
+interface Star {
+    left: number
+    top: number
+    size: number
+    baseOpacity: number
+    phase: number
+    speed: number
+    animOpacity: number
+}
+
+// 產生星點初始資料（只在初始渲染時產生一次）
+function createStars(): Star[] {
+    return Array.from({ length: STAR_COUNT }, () => {
+        const baseOpacity = Math.random() * 0.7 + 0.3
+        return {
+            left: Math.random() * 100,
+            top: Math.random() * 100,
+            size: Math.random() * 2 + 1,
+            baseOpacity,
+            phase: Math.random() * Math.PI * 2,
+            speed: Math.random() * 1.0 + 1.0, // 閃爍速度 1.0~2.0
+            animOpacity: baseOpacity,
+        }
+    })
+}
+
 // 添加座標轉換常量 - 統一管理座標轉換參數
 const COORDINATE_TRANSFORM = {
     offsetX: 579, // X轴偏移量
@@ -156,6 +186,34 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         const [orientationInputs, setOrientationInputs] = useState<{
             [key: string]: { x: string; y: string; z: string }
         }>({})
+
+        // 星空動畫狀態
+        const [starAnim, setStarAnim] = useState<Star[]>(() => createStars())
+        // 輕微閃爍動畫：每 60ms 更新一次透明度
+        useEffect(() => {
+            let mounted = true
+            let frame = 0
+            const interval = setInterval(() => {
+                if (!mounted) return
+                setStarAnim((prev) =>
+                    prev.map((star, i) => {
+                        // 用 baseOpacity 為中心，sin 波動幅度 0.5，速度不同
+                        const t = frame / 30 // 時間參數
+                        const flicker =
+                            Math.sin(t * star.speed + star.phase) * 0.5
+                        let opacity = star.baseOpacity + flicker
+                        // 限制在 0.15~1.0 之間
+                        opacity = Math.max(0.15, Math.min(1, opacity))
+                        return { ...star, animOpacity: opacity }
+                    })
+                )
+                frame++
+            }, 60)
+            return () => {
+                mounted = false
+                clearInterval(interval)
+            }
+        }, [])
 
         // 輔助函數：將圖像座標轉換為場景座標
         const imageToSceneCoords = useCallback(
@@ -964,7 +1022,7 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         ])
 
         // 使用固定標題
-        const title = '場景與路徑 (Etoile)'
+        const title = 'NYCU Scene'
 
         const [maxImageHeight, setMaxImageHeight] = useState<string>('auto') // 新增狀態儲存最大高度
 
@@ -1132,10 +1190,41 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
             <div
                 style={{
                     position: 'relative',
-                    backgroundColor: 'rgb(127, 127, 127)',
+                    minHeight: '100vh',
+                    background:
+                        'radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%)',
+                    overflow: 'hidden',
                 }}
             >
-                {isLoading && <p>正在載入路徑圖...</p>}
+                {/* 星空星點層（在最底層，不影響互動） */}
+                <div
+                    style={{
+                        position: 'absolute',
+                        inset: 0,
+                        zIndex: 0,
+                        pointerEvents: 'none',
+                    }}
+                >
+                    {starAnim.map((star, i) => (
+                        <div
+                            key={i}
+                            style={{
+                                position: 'absolute',
+                                left: `${star.left}%`,
+                                top: `${star.top}%`,
+                                width: `${star.size}px`,
+                                height: `${star.size}px`,
+                                borderRadius: '50%',
+                                background: 'white',
+                                opacity: star.animOpacity,
+                                filter: 'blur(0.5px)',
+                                transition: 'opacity 0.2s linear',
+                            }}
+                        />
+                    ))}
+                </div>
+                {/* 其餘內容照舊，zIndex > 0 的內容會蓋在星空上 */}
+                {isLoading && <p>Loading...</p>}
                 {/* 只有在 imageUrl 存在且 loading 完成後才顯示 img，或在 loading 時顯示佔位符 */}
                 <div style={{ position: 'relative' }}>
                     {imageUrl && (
@@ -1160,6 +1249,51 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                         />
                     )}
 
+                    {/* 節點 SVG 覆蓋層 */}
+                    {imageUrl && imageNaturalSize && imageRef.current && (
+                        <svg
+                            style={{
+                                position: 'absolute',
+                                left: 0,
+                                top: 0,
+                                pointerEvents: 'none', // 讓滑鼠事件穿透
+                                width: imageRef.current.offsetWidth,
+                                height: imageRef.current.offsetHeight,
+                                zIndex: 10,
+                            }}
+                            width={imageRef.current.offsetWidth}
+                            height={imageRef.current.offsetHeight}
+                        >
+                            {propDevices.map((device) => {
+                                const coords = sceneToImageCoords(
+                                    device.position_x,
+                                    device.position_y
+                                )
+                                if (!coords) return null
+                                let color = '#ff2196F3'
+                                if (device.role === 'jammer') color = '#E53935'
+                                else if (device.role === 'desired')
+                                    color = '#222'
+                                else if (device.role === 'receiver')
+                                    color = '#888'
+                                return (
+                                    <circle
+                                        key={device.id}
+                                        cx={coords.x}
+                                        cy={coords.y}
+                                        r={10}
+                                        fill={color}
+                                        stroke="#fff"
+                                        strokeWidth={1.5}
+                                        style={{
+                                            opacity: 0.95,
+                                        }}
+                                    />
+                                )
+                            })}
+                        </svg>
+                    )}
+
                     {/* 座標顯示 - 使用獨立組件，並且只在 popover 不顯示時渲染 */}
                     {!showPopover && (
                         <CoordinateDisplay position={mousePositionForDisplay} />
@@ -1170,18 +1304,18 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                         <div
                             style={{
                                 position: 'fixed',
-                                backgroundColor: 'var(--dark-accent)',
-                                color: 'var(--dark-text)',
-                                boxShadow: '0 2px 10px rgba(0, 0, 0, 0.4)',
-                                borderRadius: '5px',
-                                border: '1px solid var(--dark-border)',
-                                padding: '15px',
+                                background: '#1e2536',
+                                color: '#eaf6ff',
+                                boxShadow: '0 4px 24px 0 rgba(0,0,0,0.45)',
+                                borderRadius: '8px',
+                                border: '1px solid #3a4a6a',
+                                padding: '18px 18px 12px 18px',
                                 zIndex: 1000,
                                 left: `${popoverPosition.clientX}px`,
                                 top: `${popoverPosition.clientY + 10}px`,
                                 transform: 'translateX(-50%)',
-                                width: '330px',
-                                fontSize: '0.85rem',
+                                width: '340px',
+                                fontSize: '0.95rem',
                             }}
                         >
                             {/* 設備名稱與關閉按鈕 */}

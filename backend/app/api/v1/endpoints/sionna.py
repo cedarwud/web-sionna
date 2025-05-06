@@ -16,7 +16,6 @@ from app.services.sionna_simulation import (  # Import service functions
     get_active_devices_from_db_efficient,
     add_to_scene_safe,
     generate_empty_scene_image,
-    generate_scene_with_devices_image,  # 新增的函數
     generate_cfr_plot,  # 新增: 導入剛添加的 CFR 繪圖函數
     generate_sinr_map,  # 新增: 導入 SINR 地圖生成函數
     generate_doppler_plots,  # 新增: 導入延遲多普勒圖生成函數
@@ -115,48 +114,40 @@ async def get_scene_image_rt_endpoint(session: AsyncSession = Depends(get_sessio
 
 
 @router.get("/scene-image-devices", tags=["Sionna Simulation"])
-async def get_scene_image_devices_endpoint(
-    session: AsyncSession = Depends(get_session),
-):
-    """Generates and returns the Sionna scene image with devices (without RT paths) using data from DB."""
-    logger.info("--- API Request: /scene-image-devices ---")
+async def get_scene_image_devices_endpoint():
+    """Generates and returns the Sionna scene image with only the base map (no devices)."""
+    logger.info("--- API Request: /scene-image-devices (empty map only) ---")
 
-    # 定義臨時文件路徑用於儲存生成的場景圖像
     temp_image_path = STATIC_IMAGES_DIR / "scene_with_devices.png"
 
-    if await generate_scene_with_devices_image(str(temp_image_path), session):
-        if os.path.exists(temp_image_path):
-            file_size = os.path.getsize(temp_image_path)
-            logger.info(
-                f"Returning image for {temp_image_path} (Size: {file_size} bytes)"
-            )
+    # 只產生純地圖，不畫任何節點
+    from app.services.sionna_simulation import generate_empty_scene_image
 
-            # 使用StreamingResponse從文件流直接返回
-            def iterfile():
-                with open(temp_image_path, "rb") as f:
-                    # 每次讀取4KB
+    success = await run_in_threadpool(
+        generate_empty_scene_image, output_path=str(temp_image_path)
+    )
+    if success and os.path.exists(temp_image_path):
+        file_size = os.path.getsize(temp_image_path)
+        logger.info(f"Returning image for {temp_image_path} (Size: {file_size} bytes)")
+
+        def iterfile():
+            with open(temp_image_path, "rb") as f:
+                chunk = f.read(4096)
+                while chunk:
+                    yield chunk
                     chunk = f.read(4096)
-                    while chunk:
-                        yield chunk
-                        chunk = f.read(4096)
 
-            return StreamingResponse(
-                iterfile(),
-                media_type="image/png",
-                headers={
-                    "Content-Disposition": f"attachment; filename=scene_with_devices.png"
-                },
-            )
-        else:
-            logger.error(f"File not found after generation: {temp_image_path}")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to find scene image with devices after rendering.",
-            )
+        return StreamingResponse(
+            iterfile(),
+            media_type="image/png",
+            headers={
+                "Content-Disposition": f"attachment; filename=scene_with_devices.png"
+            },
+        )
     else:
-        logger.error("Failed to render scene with devices.")
+        logger.error(f"File not found or failed to generate: {temp_image_path}")
         raise HTTPException(
-            status_code=500, detail="Failed to render scene with devices"
+            status_code=500, detail="Failed to render empty scene image."
         )
 
 

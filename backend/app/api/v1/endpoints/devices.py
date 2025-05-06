@@ -155,12 +155,29 @@ async def delete_device_by_id(
     device_id: int,
 ) -> Any:
     """
-    刪除一個設備。
+    刪除一個設備，並檢查 tx、rx、jammer 是否都至少一個。
     """
     logger.info(f"API: Received request to delete device with ID: {device_id}")
-    device = await crud_device.remove_device(db=session, device_id=device_id)
+    # 先查出要刪除的設備
+    device = await crud_device.get_device(db=session, device_id=device_id)
     if not device:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Device not found"
         )
-    return DeviceSchema.from_orm(device)
+    # 查詢刪除後剩下的 active tx/rx/jammer 數量
+    all_active_devices = await crud_device.get_active_devices(db=session)
+    # 排除即將刪除的這個設備
+    remaining_devices = [d for d in all_active_devices if d.id != device_id]
+    tx_count = sum(1 for d in remaining_devices if d.role == DeviceRole.DESIRED.value)
+    rx_count = sum(1 for d in remaining_devices if d.role == DeviceRole.RECEIVER.value)
+    jammer_count = sum(
+        1 for d in remaining_devices if d.role == DeviceRole.JAMMER.value
+    )
+    if tx_count < 1 or rx_count < 1 or jammer_count < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="系統必須至少有一個發射器 (tx)、接收器 (rx)、干擾源 (jammer)。刪除失敗。",
+        )
+    # 通過檢查才真的刪除
+    deleted_device = await crud_device.remove_device(db=session, device_id=device_id)
+    return DeviceSchema.from_orm(deleted_device)

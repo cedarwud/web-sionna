@@ -104,7 +104,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                             }`}
                             onClick={() => onMenuClick('2DRT')}
                         >
-                            2D RT
+                            Floor Plan
                         </li>
                         <li
                             className={`navbar-item ${
@@ -112,7 +112,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                             }`}
                             onClick={() => onMenuClick('3DRT')}
                         >
-                            3D RT
+                            Stereogram
                         </li>
                     </ul>
                 </div>

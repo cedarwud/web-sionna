@@ -47,19 +47,6 @@ logger = logging.getLogger(__name__)
 SCENE_BACKGROUND_COLOR_RGB = [0.5, 0.5, 0.5]
 # --- End Constant ---
 
-# Ensure output directory exists (could also be done on app startup)
-# Note: OUTPUT_DIR is now defined in config.py as STATIC_IMAGES_DIR
-# The directory creation is also handled in config.py
-# os.makedirs(OUTPUT_DIR, exist_ok=True) # Can be removed if config.py handles it
-
-# # 新增：GLB 模型文件路徑 (REMOVED - Defined in config.py)
-# STATIC_DIR = (
-#     Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
-#     / "static"
-# )
-# MODELS_DIR = STATIC_DIR / "models"
-# NYCU_GLB_PATH = MODELS_DIR / "NYCU.glb"  # 優先使用的 GLB 檔案
-
 
 # --- 定義新的資料容器 ---
 class DeviceData(BaseModel):
@@ -263,8 +250,8 @@ def _setup_pyrender_scene_from_glb() -> Optional[pyrender.Scene]:
         cam_pose = np.array(
             [
                 [1.0, 0.0, 0.0, 17.0],
-                [0.0, 0.0, 1.0, 1020.0],
-                [0.0, -1.0, 0.0, -25.0],
+                [0.0, 0.0, 1.0, 940.0],
+                [0.0, -1.0, 0.0, -19.0],
                 [0.0, 0.0, 0.0, 1.0],
             ]
         )
@@ -284,7 +271,7 @@ def _render_crop_and_save(
     output_path: str,
     bg_color_float: List[float] = SCENE_BACKGROUND_COLOR_RGB,
     render_width: int = 1200,
-    render_height: int = 960,
+    render_height: int = 858,
     padding_y: int = 0,  # Default vertical padding
     padding_x: int = 0,  # Default horizontal padding
 ) -> bool:
@@ -602,181 +589,6 @@ def generate_empty_scene_image(output_path: str):
         return False
     except Exception as e:
         logger.error(f"Error rendering empty scene via helpers: {e}", exc_info=True)
-        return False
-
-
-# --- New Helper Function: Generate scene image with only devices ---
-async def generate_scene_with_devices_image(
-    output_path: str, session: AsyncSession
-) -> bool:
-    """Generates a scene image with devices but without RT paths."""
-    logger.info("Entering generate_scene_with_devices_image function...")
-    try:
-        # --- 1. Fetch Device Data ---
-        transmitters_data, receivers_data = await get_active_devices_from_db_efficient(
-            session
-        )
-        if not transmitters_data and not receivers_data:
-            logger.error("No active devices found in database.")
-            return False
-
-        # --- 2. Setup Base Pyrender Scene using Helper ---
-        pr_scene = _setup_pyrender_scene_from_glb()  # Helper uses this bg color
-        if pr_scene is None:
-            return False
-        logger.info("Base pyrender scene setup complete.")
-
-        # --- 3. Overlay Devices ---
-        logger.info("Overlaying devices onto pyrender scene...")
-        # Define cone dimensions and rotation for downward pointing
-        CONE_RADIUS = 12.0  # 放大圓點
-        CONE_HEIGHT = 36.0  # 放大圓點
-        # Rotate cone model (-90 deg around X) to align Trimesh +Z with Pyrender -Y (down)
-        down_rotation_matrix = trimesh.transformations.rotation_matrix(
-            -np.pi / 2, [1, 0, 0]
-        )
-        # Additional tilt (e.g., 45 degrees around X-axis)
-        tilt_angle_rad = np.radians(45)  # Increased tilt
-        tilt_rotation_matrix = trimesh.transformations.rotation_matrix(
-            tilt_angle_rad, [1, 0, 0]
-        )
-
-        # New Colors with better contrast
-        TX_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[1.0, 1.0, 0.0, 1.0]  # Bright Yellow (Keep)
-        )
-        RX_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[1.0, 0.27, 0.0, 1.0]  # Orange-Red
-        )
-        INT_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[0.4, 0.7, 1.0, 1.0]  # 較淺的藍色
-        )
-        # White material for outline
-        WHITE_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[1.0, 1.0, 1.0, 1.0]  # White
-        )
-
-        # Outline disk dimensions
-        OUTLINE_RADIUS = CONE_RADIUS + 1.0  # 跟 cone 一起變大
-        OUTLINE_HEIGHT = 0.5  # 保持不變
-
-        # Add transmitters to scene
-        for tx_data in transmitters_data:
-            if tx_data.position_list:
-                pos = tx_data.position_list
-                mat = (
-                    INT_MATERIAL_PYRENDER
-                    if tx_data.transmitter_role == DeviceRole.JAMMER
-                    else TX_MATERIAL_PYRENDER
-                )
-                try:
-                    # Create colored cone
-                    cone = trimesh.creation.cone(radius=CONE_RADIUS, height=CONE_HEIGHT)
-                    device_mesh = pyrender.Mesh.from_trimesh(cone, material=mat)
-                    # Create white outline disk (cylinder)
-                    outline_disk = trimesh.creation.cylinder(
-                        radius=OUTLINE_RADIUS, height=OUTLINE_HEIGHT
-                    )
-                    outline_mesh = pyrender.Mesh.from_trimesh(
-                        outline_disk, material=WHITE_MATERIAL_PYRENDER
-                    )
-
-                    # Pose for cone (tip at ground, pointing down)
-                    translation_matrix = trimesh.transformations.translation_matrix(
-                        [pos[0], pos[2], pos[1]]
-                    )  # Tip at ground Z=pos[2]
-                    # Only apply down rotation, no tilt
-                    cone_pose_matrix = translation_matrix @ down_rotation_matrix
-
-                    # Pose for outline disk (centered at cone base, slightly below)
-                    outline_center_z = (
-                        pos[2] - OUTLINE_HEIGHT / 2 - 0.1
-                    )  # Place slightly below cone tip
-                    outline_translation_matrix = (
-                        trimesh.transformations.translation_matrix(
-                            [pos[0], outline_center_z, pos[1]]
-                        )
-                    )
-                    outline_pose_matrix = outline_translation_matrix
-
-                    # Add outline first, then cone
-                    pr_scene.add(outline_mesh, pose=outline_pose_matrix)
-                    pr_scene.add(device_mesh, pose=cone_pose_matrix)
-
-                    logger.info(
-                        f"Added TX Cone '{tx_data.device_model.name}' with outline to scene"
-                    )
-                except Exception as dev_err:
-                    logger.error(
-                        f"Failed adding TX Cone '{tx_data.device_model.name}' to scene: {dev_err}",
-                        exc_info=True,
-                    )
-
-        # Add receivers to scene
-        for rx_data in receivers_data:
-            if rx_data.position_list:
-                pos = rx_data.position_list
-                mat = RX_MATERIAL_PYRENDER
-                try:
-                    # Create colored cone
-                    cone = trimesh.creation.cone(radius=CONE_RADIUS, height=CONE_HEIGHT)
-                    device_mesh = pyrender.Mesh.from_trimesh(cone, material=mat)
-                    # Create white outline disk (cylinder)
-                    outline_disk = trimesh.creation.cylinder(
-                        radius=OUTLINE_RADIUS, height=OUTLINE_HEIGHT
-                    )
-                    outline_mesh = pyrender.Mesh.from_trimesh(
-                        outline_disk, material=WHITE_MATERIAL_PYRENDER
-                    )
-
-                    # Pose for cone (tip at ground, pointing down)
-                    translation_matrix = trimesh.transformations.translation_matrix(
-                        [pos[0], pos[2], pos[1]]
-                    )  # Tip at ground Z=pos[2]
-                    # Only apply down rotation, no tilt
-                    cone_pose_matrix = translation_matrix @ down_rotation_matrix
-
-                    # Pose for outline disk (centered at cone base, slightly below)
-                    outline_center_z = (
-                        pos[2] - OUTLINE_HEIGHT / 2 - 0.1
-                    )  # Place slightly below cone tip
-                    outline_translation_matrix = (
-                        trimesh.transformations.translation_matrix(
-                            [pos[0], outline_center_z, pos[1]]
-                        )
-                    )
-                    outline_pose_matrix = outline_translation_matrix
-
-                    # Add outline first, then cone
-                    pr_scene.add(outline_mesh, pose=outline_pose_matrix)
-                    pr_scene.add(device_mesh, pose=cone_pose_matrix)
-
-                    logger.info(
-                        f"Added RX Cone '{rx_data.device_model.name}' with outline to scene"
-                    )
-                except Exception as dev_err:
-                    logger.error(
-                        f"Failed adding RX Cone '{rx_data.device_model.name}' to scene: {dev_err}",
-                        exc_info=True,
-                    )
-
-        logger.info("Devices overlay complete.")
-
-        # --- 4. Render, Crop, and Save using Helper ---
-        success = _render_crop_and_save(
-            pr_scene,
-            output_path,
-            bg_color_float=SCENE_BACKGROUND_COLOR_RGB,
-            padding_x=5,  # Set horizontal padding to 5
-            padding_y=20,  # Keep vertical padding at 20
-        )
-        return success
-
-    except ImportError as ie:
-        logger.error(f"Import error: {ie}", exc_info=True)
-        return False
-    except Exception as e:
-        logger.error(f"Error in generate_scene_with_devices_image: {e}", exc_info=True)
         return False
 
 
@@ -1404,12 +1216,6 @@ async def generate_doppler_plots(
         # 添加發射器
         if not active_desired:
             logger.warning("沒有活動的發射器，將無法生成有效的延遲多普勒圖")
-            # 移除默認發射器
-            # tx_list.extend([
-            #     ("tx0", [-100, -100, 20], [np.pi * 5 / 6, 0, 0], "desired", 30),
-            #     ("tx1", [-100, 50, 20], [np.pi / 6, 0, 0], "desired", 30),
-            #     ("tx2", [100, -100, 20], [-np.pi / 2, 0, 0], "desired", 30),
-            # ])
         else:
             # 添加從資料庫獲取的發射器
             for tx in active_desired:
