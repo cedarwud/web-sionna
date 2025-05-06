@@ -59,14 +59,17 @@ SCENE_WITH_PATHS_IMAGE_PATH = OUTPUT_DIR / "scene_with_paths.png"
 EMPTY_SCENE_IMAGE_PATH = OUTPUT_DIR / "empty_scene.png"
 CFR_PLOT_IMAGE_PATH = OUTPUT_DIR / "cfr_plot.png"  # 新增: CFR 圖像路徑
 SINR_MAP_IMAGE_PATH = OUTPUT_DIR / "sinr_map.png"  # 新增: SINR 地圖路徑
+# v1 版本的多普勒圖路徑 (為了向後兼容保留)
 UNSCALED_DOPPLER_IMAGE_PATH = (
     OUTPUT_DIR / "unscaled_delay_doppler.png"
-)  # 新增: 未縮放的延遲多普勒圖路徑
+)  # 未縮放的延遲多普勒圖路徑
 POWER_SCALED_DOPPLER_IMAGE_PATH = (
     OUTPUT_DIR / "power_scaled_delay_doppler.png"
-)  # 新增: 功率縮放的延遲多普勒圖路徑
+)  # 功率縮放的延遲多普勒圖路徑
+# v2 版本的單一多普勒圖路徑
+DOPPLER_IMAGE_PATH = OUTPUT_DIR / "delay_doppler.png"  # 新版本: 統一的延遲多普勒圖路徑
 
-# 新增: 通道響應圖路徑
+# 新增: Channel Response Plots
 CHANNEL_RESPONSE_IMAGE_PATH = OUTPUT_DIR / "channel_response_plots.png"
 logger.info(
     f"Channel Response Plots Image Path (in container): {CHANNEL_RESPONSE_IMAGE_PATH}"
@@ -97,6 +100,9 @@ logger.info(
 logger.info(
     f"Power Scaled Delay Doppler Image Path (in container): {POWER_SCALED_DOPPLER_IMAGE_PATH}"
 )  # 新增: 功率縮放的延遲多普勒圖路徑
+logger.info(
+    f"DOPPLER Image Path (in container): {DOPPLER_IMAGE_PATH}"
+)  # 新增: 新版本: 統一的延遲多普勒圖路徑
 
 
 # --- GPU/CPU Configuration ---

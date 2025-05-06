@@ -335,7 +335,7 @@ const SINRViewer = () => {
             </div>
 
             {isLoading && (
-                <div className="loading">正在即時生成 SINR Map...</div>
+                <div className="loading">正在即時運算並生成 SINR Map...</div>
             )}
             {error && <div className="error">{error}</div>}
             {imageUrl && (
@@ -437,7 +437,7 @@ const CFRViewer = () => {
 
             {isLoading && (
                 <div className="loading">
-                    正在即時生成 Constellation & CFR...
+                    正在即時運算並生成 Constellation & CFR...
                 </div>
             )}
             {error && <div className="error">{error}</div>}
@@ -455,22 +455,15 @@ const CFRViewer = () => {
 // Delay-Doppler 顯示組件
 const DelayDopplerViewer = () => {
     const [isLoading, setIsLoading] = useState(true)
-    const [unscaledImageUrl, setUnscaledImageUrl] = useState<string | null>(
-        null
-    )
-    const [powerScaledImageUrl, setPowerScaledImageUrl] = useState<
-        string | null
-    >(null)
+    const [imageUrl, setImageUrl] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [lastUpdate, setLastUpdate] = useState<string>('')
 
     // 使用 ref 來跟踪當前的 imageUrl，避免在 useCallback 中產生依賴
-    const unscaledImageUrlRef = useRef<string | null>(null)
-    const powerScaledImageUrlRef = useRef<string | null>(null)
+    const imageUrlRef = useRef<string | null>(null)
 
-    // 後端API路徑
-    const UNSCALED_API_PATH = '/api/v1/sionna/unscaled-doppler-image'
-    const POWER_SCALED_API_PATH = '/api/v1/sionna/power-scaled-doppler-image'
+    // 後端API路徑 - 使用新的統一端點
+    const API_PATH = '/api/v1/sionna/doppler-plots'
 
     // 記錄請求時間戳，用於顯示最後更新時間
     const updateTimestamp = () => {
@@ -481,98 +474,69 @@ const DelayDopplerViewer = () => {
 
     // 同步 imageUrl 到 ref
     useEffect(() => {
-        unscaledImageUrlRef.current = unscaledImageUrl
-        powerScaledImageUrlRef.current = powerScaledImageUrl
-    }, [unscaledImageUrl, powerScaledImageUrl])
+        imageUrlRef.current = imageUrl
+    }, [imageUrl])
 
     // 請求並加載延遲多普勒圖
-    const loadDopplerImages = useCallback(() => {
+    const loadDopplerImage = useCallback(() => {
         setIsLoading(true)
         setError(null)
 
-        // 計數器來追踪兩個圖像是否都已載入
-        let imagesLoaded = 0
-        const totalImages = 2
-
-        // 載入未縮放的延遲多普勒圖
-        fetch(UNSCALED_API_PATH)
+        // 從 API 獲取新的多普勒圖資訊
+        fetch(API_PATH)
             .then((response) => {
                 if (!response.ok) {
                     throw new Error(
                         `API 請求失敗: ${response.status} ${response.statusText}`
                     )
                 }
-                return response.blob()
+                return response.json()
+            })
+            .then((data) => {
+                // 用獲得的 URL 載入圖片
+                return fetch('/api/v1/sionna/unscaled-doppler-image') // 使用舊的端點，但它現在會返回新的統一圖像
+                    .then((imgResponse) => {
+                        if (!imgResponse.ok) {
+                            throw new Error(
+                                `圖片請求失敗: ${imgResponse.status} ${imgResponse.statusText}`
+                            )
+                        }
+                        return imgResponse.blob()
+                    })
             })
             .then((blob) => {
                 // 清理舊的 URL
-                if (unscaledImageUrlRef.current) {
-                    URL.revokeObjectURL(unscaledImageUrlRef.current)
+                if (imageUrlRef.current) {
+                    URL.revokeObjectURL(imageUrlRef.current)
                 }
 
                 const url = URL.createObjectURL(blob)
-                setUnscaledImageUrl(url)
-                imagesLoaded++
-                if (imagesLoaded === totalImages) {
-                    setIsLoading(false)
-                    updateTimestamp()
-                }
-            })
-            .catch((err) => {
-                console.error('載入未縮放延遲多普勒圖失敗:', err)
-                setError('無法載入未縮放延遲多普勒圖: ' + err.message)
+                setImageUrl(url)
                 setIsLoading(false)
-            })
-
-        // 載入功率縮放的延遲多普勒圖
-        fetch(POWER_SCALED_API_PATH)
-            .then((response) => {
-                if (!response.ok) {
-                    throw new Error(
-                        `API 請求失敗: ${response.status} ${response.statusText}`
-                    )
-                }
-                return response.blob()
-            })
-            .then((blob) => {
-                // 清理舊的 URL
-                if (powerScaledImageUrlRef.current) {
-                    URL.revokeObjectURL(powerScaledImageUrlRef.current)
-                }
-
-                const url = URL.createObjectURL(blob)
-                setPowerScaledImageUrl(url)
-                imagesLoaded++
-                if (imagesLoaded === totalImages) {
-                    setIsLoading(false)
-                    updateTimestamp()
-                }
+                updateTimestamp()
             })
             .catch((err) => {
-                console.error('載入功率縮放延遲多普勒圖失敗:', err)
-                setError('無法載入功率縮放延遲多普勒圖: ' + err.message)
+                console.error('載入延遲多普勒圖失敗:', err)
+                setError('無法載入延遲多普勒圖: ' + err.message)
                 setIsLoading(false)
             })
     }, [])
 
     // 首次加載時獲取圖像
     useEffect(() => {
-        loadDopplerImages()
+        loadDopplerImage()
 
         // 清理函數
         return () => {
-            if (unscaledImageUrlRef.current) {
-                URL.revokeObjectURL(unscaledImageUrlRef.current)
-            }
-            if (powerScaledImageUrlRef.current) {
-                URL.revokeObjectURL(powerScaledImageUrlRef.current)
+            if (imageUrlRef.current) {
+                URL.revokeObjectURL(imageUrlRef.current)
             }
         }
-    }, [loadDopplerImages])
+    }, [loadDopplerImage])
 
     // 刷新按鈕處理函數
     const handleRefresh = () => {
-        loadDopplerImages()
+        loadDopplerImage()
     }
 
     return (
@@ -591,27 +555,18 @@ const DelayDopplerViewer = () => {
             </div>
 
             {isLoading && (
-                <div className="loading">正在即時生成 Delay-Doppler...</div>
+                <div className="loading">
+                    正在即時運算並生成 Delay-Doppler...
+                </div>
             )}
             {error && <div className="error">{error}</div>}
             <div className="delay-doppler-container">
-                {unscaledImageUrl && (
-                    <div className="image-item">
-                        {/* <h4>Unscaled Channels</h4> */}
+                {imageUrl && (
+                    <div className="image-item doppler-image-v2">
                         <img
-                            src={unscaledImageUrl}
-                            alt="Unscaled Delay-Doppler"
-                            className="view-image"
-                        />
-                    </div>
-                )}
-                {powerScaledImageUrl && (
-                    <div className="image-item">
-                        {/* <h4>Power-Scaled Channels</h4> */}
-                        <img
-                            src={powerScaledImageUrl}
-                            alt="Power-Scaled Delay-Doppler"
-                            className="view-image"
+                            src={imageUrl}
+                            alt="Delay-Doppler Plot"
+                            className="view-image doppler-image-v2"
                         />
                     </div>
                 )}
@@ -719,7 +674,9 @@ const TimeFrequencyViewer = () => {
             </div>
 
             {isLoading && (
-                <div className="loading">正在即時生成通道響應圖...</div>
+                <div className="loading">
+                    正在即時運算並生成 Channel Response Plots...
+                </div>
             )}
             {error && <div className="error">{error}</div>}
             {imageUrl && (

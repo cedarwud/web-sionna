@@ -28,6 +28,7 @@ from app.core.config import (
     CFR_PLOT_IMAGE_PATH,
     UNSCALED_DOPPLER_IMAGE_PATH,
     POWER_SCALED_DOPPLER_IMAGE_PATH,
+    DOPPLER_IMAGE_PATH,
 )
 from app.crud import crud_device  # 導入整合後的 crud_device 模塊
 
@@ -344,6 +345,11 @@ async def generate_scene_with_paths_image(
 ) -> bool:
     logger.info("Entering generate_scene_with_paths_image (using helpers) function...")
     try:
+        # 刪除舊的圖檔 (如果存在)
+        if os.path.exists(output_path):
+            logger.info(f"刪除舊的場景路徑圖檔: {output_path}")
+            os.remove(output_path)
+
         # --- 1. Fetch Device Data --- (Keep)
         transmitters_data, receivers_data = await get_active_devices_from_db_efficient(
             session
@@ -569,6 +575,11 @@ def generate_empty_scene_image(output_path: str):
     """Generates a cropped scene image by rendering the GLB file (using helpers)."""
     logger.info(f"Entering generate_empty_scene_image function, calling helpers...")
     try:
+        # 刪除舊的圖檔 (如果存在)
+        if os.path.exists(output_path):
+            logger.info(f"刪除舊的空場景圖檔: {output_path}")
+            os.remove(output_path)
+
         # 1. Setup scene using helper
         pr_scene = _setup_pyrender_scene_from_glb()  # Helper uses this bg color
         if pr_scene is None:
@@ -605,6 +616,11 @@ async def generate_cfr_plot(
     logger.info("Entering generate_cfr_plot function...")
 
     try:
+        # 刪除舊的圖檔 (如果存在)
+        if os.path.exists(output_path):
+            logger.info(f"刪除舊的 CFR 圖檔: {output_path}")
+            os.remove(output_path)
+
         logger.info("Fetching active receivers from database...")
         active_receivers = await crud_device.get_devices_by_role(
             db=session, role=DeviceRole.RECEIVER.value, active_only=True
@@ -906,9 +922,15 @@ async def generate_sinr_map(
     logger.info("開始生成 SINR 地圖...")
 
     try:
+        # 刪除舊的圖檔 (如果存在)
+        if os.path.exists(output_path):
+            logger.info(f"刪除舊的 SINR 地圖圖檔: {output_path}")
+            os.remove(output_path)
+
         # GPU 設置
         os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
         gpus = tf.config.list_physical_devices("GPU")
+
         if gpus:
             tf.config.experimental.set_memory_growth(gpus[0], True)
             logger.info("GPU 記憶體成長已啟用")
@@ -1159,7 +1181,7 @@ async def generate_sinr_map(
             return False
 
     except Exception as e:
-        logger.exception(f"Error in generate_sinr_map: {e}")
+        logger.exception(f"生成 SINR 地圖時發生錯誤: {e}")
         # 確保關閉所有打開的圖表
         plt.close("all")
         return False
@@ -1168,24 +1190,36 @@ async def generate_sinr_map(
 # 新增 Doppler 圖生成函數
 async def generate_doppler_plots(
     session: AsyncSession,
-    unscaled_output_path: str = str(UNSCALED_DOPPLER_IMAGE_PATH),
-    power_scaled_output_path: str = str(POWER_SCALED_DOPPLER_IMAGE_PATH),
+    output_path: str = str(DOPPLER_IMAGE_PATH),
 ) -> bool:
     """
-    生成延遲多普勒圖，基於 doppler.py 中的功能
+    生成延遲多普勒圖 (Delay-Doppler)，基於 delay-doppler-v2.py 的功能
 
-    生成兩個圖像：
-    1. 未縮放的延遲多普勒圖
-    2. 功率縮放的延遲多普勒圖
-
-    從數據庫中獲取發射器和干擾器參數。
+    從數據庫中獲取發射器、接收器和干擾器參數，生成統一的 4x3 延遲多普勒圖
     """
     logger.info("開始生成延遲多普勒圖...")
 
     try:
+        # 刪除舊的圖檔 (如果存在)
+        if os.path.exists(output_path):
+            logger.info(f"刪除舊的延遲多普勒圖檔: {output_path}")
+            os.remove(output_path)
+
+        # 為了向後兼容，同時刪除舊版本的圖檔
+        if os.path.exists(UNSCALED_DOPPLER_IMAGE_PATH):
+            logger.info(f"刪除舊的未縮放延遲多普勒圖檔: {UNSCALED_DOPPLER_IMAGE_PATH}")
+            os.remove(UNSCALED_DOPPLER_IMAGE_PATH)
+
+        if os.path.exists(POWER_SCALED_DOPPLER_IMAGE_PATH):
+            logger.info(
+                f"刪除舊的功率縮放延遲多普勒圖檔: {POWER_SCALED_DOPPLER_IMAGE_PATH}"
+            )
+            os.remove(POWER_SCALED_DOPPLER_IMAGE_PATH)
+
         # GPU 設置
         os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
         gpus = tf.config.list_physical_devices("GPU")
+
         if gpus:
             tf.config.experimental.set_memory_growth(gpus[0], True)
             logger.info("GPU 記憶體成長已啟用")
@@ -1214,64 +1248,45 @@ async def generate_doppler_plots(
         tx_list = []
 
         # 添加發射器
-        if not active_desired:
-            logger.warning("沒有活動的發射器，將無法生成有效的延遲多普勒圖")
-        else:
-            # 添加從資料庫獲取的發射器
-            for tx in active_desired:
-                tx_name = tx.name
-                tx_position = [tx.position_x, tx.position_y, tx.position_z]
-                tx_orientation = [tx.orientation_x, tx.orientation_y, tx.orientation_z]
-                tx_power = tx.power_dbm
+        for tx in active_desired:
+            tx_name = tx.name
+            tx_position = [tx.position_x, tx.position_y, tx.position_z]
+            tx_orientation = [tx.orientation_x, tx.orientation_y, tx.orientation_z]
+            tx_power = tx.power_dbm
 
-                tx_list.append(
-                    (tx_name, tx_position, tx_orientation, "desired", tx_power)
-                )
-                logger.info(
-                    f"添加發射器: {tx_name}, 位置: {tx_position}, 方向: {tx_orientation}, 功率: {tx_power} dBm"
-                )
+            tx_list.append((tx_name, tx_position, tx_orientation, "desired", tx_power))
+            logger.info(
+                f"添加發射器: {tx_name}, 位置: {tx_position}, 方向: {tx_orientation}, 功率: {tx_power} dBm"
+            )
 
         # 添加干擾器
-        if not active_jammers:
-            logger.warning("沒有活動的干擾器，圖中將不包含干擾信息")
-        else:
-            # 添加從資料庫獲取的干擾器
-            for jammer in active_jammers:
-                jammer_name = jammer.name
-                jammer_position = [
-                    jammer.position_x,
-                    jammer.position_y,
-                    jammer.position_z,
-                ]
-                jammer_orientation = [
-                    jammer.orientation_x,
-                    jammer.orientation_y,
-                    jammer.orientation_z,
-                ]
-                jammer_power = jammer.power_dbm
+        for jammer in active_jammers:
+            jammer_name = jammer.name
+            jammer_position = [jammer.position_x, jammer.position_y, jammer.position_z]
+            jammer_orientation = [
+                jammer.orientation_x,
+                jammer.orientation_y,
+                jammer.orientation_z,
+            ]
+            jammer_power = jammer.power_dbm
 
-                tx_list.append(
-                    (
-                        jammer_name,
-                        jammer_position,
-                        jammer_orientation,
-                        "jammer",
-                        jammer_power,
-                    )
+            tx_list.append(
+                (
+                    jammer_name,
+                    jammer_position,
+                    jammer_orientation,
+                    "jammer",
+                    jammer_power,
                 )
-                logger.info(
-                    f"添加干擾器: {jammer_name}, 位置: {jammer_position}, 方向: {jammer_orientation}, 功率: {jammer_power} dBm"
-                )
+            )
+            logger.info(
+                f"添加干擾器: {jammer_name}, 位置: {jammer_position}, 方向: {jammer_orientation}, 功率: {jammer_power} dBm"
+            )
 
-        # 檢查是否有任何發射器（包括干擾器）被添加
-        if not tx_list:
-            logger.error("數據庫中沒有活動的發射器或干擾器，無法生成延遲多普勒圖")
-            return False
-
-        # 接收器設置
+        # 設置接收器
         if not active_receivers:
-            logger.warning("沒有活動的接收器，使用默認值")
-            rx_config = ("rx", [0, 0, 20])
+            logger.warning("沒有找到活動的接收器，使用默認位置")
+            rx_config = ("rx", [0, 0, 40])
         else:
             # 使用第一個活動接收器
             receiver = active_receivers[0]
@@ -1281,49 +1296,60 @@ async def generate_doppler_plots(
             )
             logger.info(f"使用接收器 '{rx_config[0]}' 在位置 {rx_config[1]}")
 
-        # 參數設置
-        scene_name = str(NYCU_XML_PATH)
-        logger.info(f"從 {scene_name} 加載場景")
+        # -------- 以下為參考 delay-doppler-v2.py 的邏輯 --------
 
-        tx_array_config = {
-            "num_rows": 1,
-            "num_cols": 1,
-            "vertical_spacing": 0.5,
-            "horizontal_spacing": 0.5,
-            "pattern": "iso",
-            "polarization": "V",
-        }
-        rx_array_config = tx_array_config
+        # 參數設定
+        TX_ARRAY_CONFIG = dict(
+            num_rows=1,
+            num_cols=1,
+            vertical_spacing=0.5,
+            horizontal_spacing=0.5,
+            pattern="iso",
+            polarization="V",
+        )
+        RX_ARRAY_CONFIG = TX_ARRAY_CONFIG
 
-        pathsolver_args = {
-            "max_depth": 5,
-            "max_num_paths_per_src": 1000,
-            "los": True,
-            "specular_reflection": True,
-            "diffuse_reflection": False,
-            "refraction": False,
-            "synthetic_array": False,
-            "seed": 41,
-        }
+        # 如果沒有設備，回傳錯誤
+        if not tx_list:
+            logger.error("沒有活動的發射器或干擾器，無法生成延遲多普勒圖")
+            return False
 
-        # OFDM 參數
-        n_subcarriers = 512
-        subcarrier_spacing = 30e3  # Hz
-        num_ofdm_symbols = 512
+        PATHSOLVER_ARGS = dict(
+            max_depth=3,
+            los=True,
+            specular_reflection=True,
+            diffuse_reflection=False,
+            refraction=False,
+            synthetic_array=False,
+            seed=41,
+        )
 
-        # 場景設置
-        logger.info("設置場景")
-        scene = load_scene(scene_name)
-        scene.tx_array = PlanarArray(**tx_array_config)
-        scene.rx_array = PlanarArray(**rx_array_config)
+        RMSOLVER_ARGS = dict(max_depth=10, cell_size=(1.0, 1.0), samples_per_tx=10**7)
 
-        # 清除現有的發射器和接收器
-        for name in list(scene.transmitters.keys()) + list(scene.receivers.keys()):
-            scene.remove(name)
+        N_SYMBOLS = 1
+        N_SUBCARRIERS = 1024
+        SUBCARRIER_SPACING = 30e3
+        num_ofdm_symbols = 1024
+        num_subcarriers = 1024
+        subcarrier_spacing = 30e3
 
-        # 添加發射器
-        logger.info("添加發射器和干擾器")
+        # 建立場景與天線配置
+        logger.info(f"從 {NYCU_XML_PATH} 加載場景")
+        scene = load_scene(NYCU_XML_PATH)
+        scene.tx_array = PlanarArray(**TX_ARRAY_CONFIG)
+        scene.rx_array = PlanarArray(**RX_ARRAY_CONFIG)
 
+        # 移除現有發射機和接收機
+        for tx_name in list(scene.transmitters.keys()):
+            scene.remove(tx_name)
+        for rx_name in list(scene.receivers.keys()):
+            scene.remove(rx_name)
+
+        # 確認清空
+        if len(scene.transmitters) > 0 or len(scene.receivers) > 0:
+            logger.warning("無法完全清空場景中的發射機和接收機")
+
+        # 新增發射機
         def add_tx(scene, name, pos, ori, role, power_dbm):
             tx = SionnaTransmitter(
                 name=name, position=pos, orientation=ori, power_dbm=power_dbm
@@ -1335,16 +1361,12 @@ async def generate_doppler_plots(
         for name, pos, ori, role, p_dbm in tx_list:
             add_tx(scene, name, pos, ori, role, p_dbm)
 
-        # 添加接收器
+        # 新增接收機
         rx_name, rx_pos = rx_config
         logger.info(f"添加接收器 '{rx_name}' 在位置 {rx_pos}")
         scene.add(SionnaReceiver(name=rx_name, position=rx_pos))
 
-        # 為所有發射器分配速度
-        for name, tx in scene.transmitters.items():
-            tx.velocity = [30, 0, 0]
-
-        # 按角色分組發射器
+        # 分組索引
         tx_names = list(scene.transmitters.keys())
         all_txs = [scene.get(n) for n in tx_names]
         idx_des = [
@@ -1356,9 +1378,14 @@ async def generate_doppler_plots(
 
         # 計算 CFR
         logger.info("計算 CFR")
+        freqs = subcarrier_frequencies(N_SUBCARRIERS, SUBCARRIER_SPACING)
+        for name in scene.transmitters:
+            scene.get(name).velocity = [30, 0, 0]
+
+        # 使用 PathSolver
         solver = PathSolver()
         try:
-            paths = solver(scene, **pathsolver_args)
+            paths = solver(scene, **PATHSOLVER_ARGS)
         except RuntimeError as e:
             logger.error(f"PathSolver 错误: {e}")
             logger.error(
@@ -1366,180 +1393,128 @@ async def generate_doppler_plots(
             )
             return False
 
-        freqs = subcarrier_frequencies(n_subcarriers, subcarrier_spacing)
         ofdm_symbol_duration = 1 / subcarrier_spacing
+        delay_resolution = ofdm_symbol_duration / num_subcarriers
+        doppler_resolution = subcarrier_spacing / num_ofdm_symbols
 
+        # 計算 CFR
         H_unit = paths.cfr(
             frequencies=freqs,
             sampling_frequency=1 / ofdm_symbol_duration,
             num_time_steps=num_ofdm_symbols,
-            normalize_delays=True,
+            normalize_delays=False,
             normalize=False,
             out_type="numpy",
-        )
+        ).squeeze()
 
-        logger.info(f"H_unit shape before squeeze: {H_unit.shape}")
-        H_unit = H_unit.squeeze()  # (num_tx, T, F)
-        logger.info(f"H_unit shape after squeeze: {H_unit.shape}")
+        # 處理功率加權
+        tx_p_lin = 10 ** (np.array([tx.power_dbm for tx in all_txs]) / 10) / 1e3
+        tx_p_lin = np.squeeze(tx_p_lin)
+        sqrtP = np.sqrt(tx_p_lin)[:, None, None]
+        H_unit = H_unit * sqrtP
 
-        # 計算線性功率
-        tx_p_lin = (
-            10 ** (np.array([tx.power_dbm for tx in all_txs]) / 10) / 1e3
-        )  # (num_tx,)
-        sqrtP = np.sqrt(tx_p_lin).reshape(-1, 1, 1)  # (num_tx, 1, 1)
-        H_pw = H_unit * sqrtP  # (num_tx, T, F) * (num_tx, 1, 1)
-        logger.info(f"H_pw shape: {H_pw.shape}")
-
-        # 按角色分組求和（功率縮放通道）
-        if idx_des:
-            H_des = H_pw[idx_des].sum(axis=0)  # (T, F)
-        else:
-            H_des = np.zeros((num_ofdm_symbols, n_subcarriers), dtype=complex)
-
-        if idx_jam:
-            H_jam = H_pw[idx_jam].sum(axis=0)  # (T, F)
-        else:
-            H_jam = np.zeros((num_ofdm_symbols, n_subcarriers), dtype=complex)
-
-        H_all = H_des + H_jam
-        logger.info(f"H_des shape (power-scaled): {H_des.shape}")
-
-        # 按角色分組求和（未縮放通道）
-        if idx_des:
-            H_des_unscaled = H_unit[idx_des].sum(axis=0)  # (T, F)
-        else:
-            H_des_unscaled = np.zeros((num_ofdm_symbols, n_subcarriers), dtype=complex)
-
-        if idx_jam:
-            H_jam_unscaled = H_unit[idx_jam].sum(axis=0)  # (T, F)
-        else:
-            H_jam_unscaled = np.zeros((num_ofdm_symbols, n_subcarriers), dtype=complex)
-
-        H_all_unscaled = H_des_unscaled + H_jam_unscaled
-        logger.info(f"H_des_unscaled shape: {H_des_unscaled.shape}")
-
-        # 定義延遲多普勒轉換函數
+        # 計算 Delay-Doppler 圖
         def to_delay_doppler(H_tf):
-            logger.info(f"Input H_tf shape: {H_tf.shape}")
-            Hf = np.fft.fftshift(H_tf, axes=-1)  # 頻率軸移位
-            h_delay = np.fft.ifft(Hf, axis=-1, norm="ortho")  # 頻率到延遲
-            h_dd = np.fft.fft(h_delay, axis=-2, norm="ortho")  # 時間到多普勒
-            h_dd = np.fft.fftshift(h_dd, axes=-2)  # 多普勒軸移位
-            logger.info(f"Output h_dd shape: {h_dd.shape}")
+            Hf = np.fft.fftshift(H_tf, axes=1)
+            h_delay = np.fft.ifft(Hf, axis=1, norm="ortho")
+            h_dd = np.fft.fft(h_delay, axis=0, norm="ortho")
+            h_dd = np.fft.fftshift(h_dd, axes=0)
             return h_dd
 
-        # 計算未縮放通道的延遲多普勒
-        logger.info("計算未縮放通道的延遲多普勒")
-        Hdd_des_unscaled = to_delay_doppler(H_des_unscaled)
-        Hdd_jam_unscaled = to_delay_doppler(H_jam_unscaled)
-        Hdd_all_unscaled = to_delay_doppler(H_all_unscaled)
-        logger.info(f"Hdd_des_unscaled shape: {Hdd_des_unscaled.shape}")
+        # 計算每個發射機的延遲多普勒圖
+        Hdd_list = [np.abs(to_delay_doppler(H_unit[i])) for i in range(H_unit.shape[0])]
 
-        # 計算功率縮放通道的延遲多普勒
-        logger.info("計算功率縮放通道的延遲多普勒")
-        Hdd_des = to_delay_doppler(H_des)
-        Hdd_jam = to_delay_doppler(H_jam)
-        Hdd_all = to_delay_doppler(H_all)
-        logger.info(f"Hdd_des shape (power-scaled): {Hdd_des.shape}")
+        # 動態組合網格
+        grids = []
+        labels = []
+        doppler_bins = np.arange(
+            -num_ofdm_symbols / 2 * doppler_resolution,
+            num_ofdm_symbols / 2 * doppler_resolution,
+            doppler_resolution,
+        )
+        delay_bins = (
+            np.arange(0, num_subcarriers * delay_resolution, delay_resolution) / 1e-9
+        )
+        x, y = np.meshgrid(delay_bins, doppler_bins)
 
-        # 定義繪圖範圍
-        T, F = Hdd_des.shape  # 應該是 (512, 512)
         offset = 20
-        d_start, d_end = 0, offset * 2  # 延遲：前 40 個樣本
-        t_mid = T // 2  # 多普勒：中心在 0 Hz
-        t_start, t_end = t_mid - offset, t_mid + offset  # 多普勒：±20 個樣本
+        x_start = int(num_subcarriers / 2) - offset
+        x_end = int(num_subcarriers / 2) + offset
+        y_start = 0
+        y_end = offset
+        x_grid = x[x_start:x_end, y_start:y_end]
+        y_grid = y[x_start:x_end, y_start:y_end]
 
-        # 坐標軸
-        delay_bins = np.arange(F) * ((1 / subcarrier_spacing) / F) * 1e9  # ns
-        doppler_bins = np.fft.fftshift(
-            np.fft.fftfreq(T, d=1 / subcarrier_spacing)
-        )  # Hz
-        X, Y = np.meshgrid(delay_bins[d_start:d_end], doppler_bins[t_start:t_end])
+        # Desired 個別 - 使用原始索引 i 而非 k+1
+        for k, i in enumerate(idx_des):
+            Zi = Hdd_list[i][x_start:x_end, y_start:y_end]
+            grids.append(Zi)
+            labels.append(f"Des Tx{i}")  # 使用 i 而非 k+1
 
-        # --- 第一個圖：未縮放通道 ---
-        logger.info("繪製未縮放通道的延遲多普勒圖")
-        fig1 = plt.figure(figsize=(18, 5))
-        fig1.suptitle("Delay-Doppler Plots (Unscaled Channels)")
+        # Jammer 個別 - 使用原始索引 i 而非 k+1
+        for k, i in enumerate(idx_jam):
+            Zi = Hdd_list[i][x_start:x_end, y_start:y_end]
+            grids.append(Zi)
+            labels.append(f"Jam Tx{i}")  # 使用 i 而非 k+1
 
-        ax1 = fig1.add_subplot(131, projection="3d")
-        Z_des_unscaled = np.abs(Hdd_des_unscaled[t_start:t_end, d_start:d_end])
-        ax1.plot_surface(X, Y, Z_des_unscaled, cmap="viridis", edgecolor="none")
-        ax1.set(
-            title="Delay–Doppler |Desired|", xlabel="Delay (ns)", ylabel="Doppler (Hz)"
-        )
+        # Desired All
+        if idx_des:
+            Z_des_all = np.sum([Hdd_list[i] for i in idx_des], axis=0)
+            grids.append(Z_des_all[x_start:x_end, y_start:y_end])
+            labels.append("Des ALL")
 
-        ax2 = fig1.add_subplot(132, projection="3d")
-        Z_jam_unscaled = np.abs(Hdd_jam_unscaled[t_start:t_end, d_start:d_end])
-        ax2.plot_surface(X, Y, Z_jam_unscaled, cmap="viridis", edgecolor="none")
-        ax2.set(
-            title="Delay–Doppler |Jammer|", xlabel="Delay (ns)", ylabel="Doppler (Hz)"
-        )
+        # Jammer All
+        if idx_jam:
+            Z_jam_all = np.sum([Hdd_list[i] for i in idx_jam], axis=0)
+            grids.append(Z_jam_all[x_start:x_end, y_start:y_end])
+            labels.append("Jam ALL")
 
-        ax3 = fig1.add_subplot(133, projection="3d")
-        Z_all_unscaled = np.abs(Hdd_all_unscaled[t_start:t_end, d_start:d_end])
-        ax3.plot_surface(X, Y, Z_all_unscaled, cmap="viridis", edgecolor="none")
-        ax3.set(title="Delay–Doppler |All|", xlabel="Delay (ns)", ylabel="Doppler (Hz)")
+        # All Tx
+        Z_all = np.sum(Hdd_list, axis=0)
+        grids.append(Z_all[x_start:x_end, y_start:y_end])
+        labels.append("ALL Tx")
 
-        plt.tight_layout()
+        # 統一 Z 軸
+        z_min = 0
+        z_max = max(g.max() for g in grids) * 1.05
 
-        # 確保輸出目錄存在
-        os.makedirs(os.path.dirname(unscaled_output_path), exist_ok=True)
+        # 自動排版
+        n_plots = len(grids)
+        cols = 3
+        rows = int(np.ceil(n_plots / cols))
 
-        logger.info(f"保存未縮放圖到 {unscaled_output_path}")
-        plt.savefig(unscaled_output_path, dpi=300, bbox_inches="tight")
-        plt.close(fig1)  # 關閉圖表以釋放記憶體
-
-        # --- 第二個圖：功率縮放通道 ---
-        logger.info("繪製功率縮放通道的延遲多普勒圖")
-        fig2 = plt.figure(figsize=(18, 5))
-        fig2.suptitle("Delay-Doppler Plots (Power-Scaled Channels)")
-
-        ax1 = fig2.add_subplot(131, projection="3d")
-        Z_des = np.abs(Hdd_des[t_start:t_end, d_start:d_end])
-        ax1.plot_surface(X, Y, Z_des, cmap="viridis", edgecolor="none")
-        ax1.set(
-            title="Delay–Doppler |Desired|", xlabel="Delay (ns)", ylabel="Doppler (Hz)"
-        )
-
-        ax2 = fig2.add_subplot(132, projection="3d")
-        Z_jam = np.abs(Hdd_jam[t_start:t_end, d_start:d_end])
-        ax2.plot_surface(X, Y, Z_jam, cmap="viridis", edgecolor="none")
-        ax2.set(
-            title="Delay–Doppler |Jammer|", xlabel="Delay (ns)", ylabel="Doppler (Hz)"
-        )
-
-        ax3 = fig2.add_subplot(133, projection="3d")
-        Z_all = np.abs(Hdd_all[t_start:t_end, d_start:d_end])
-        ax3.plot_surface(X, Y, Z_all, cmap="viridis", edgecolor="none")
-        ax3.set(title="Delay–Doppler |All|", xlabel="Delay (ns)", ylabel="Doppler (Hz)")
-
-        plt.tight_layout()
+        # 調整圖像大小使其擴展到容器寬度 - 使用與原始相同的圖像大小計算
+        figsize = (cols * 4.5, rows * 4.5)
 
         # 確保輸出目錄存在
-        os.makedirs(os.path.dirname(power_scaled_output_path), exist_ok=True)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        logger.info(f"保存功率縮放圖到 {power_scaled_output_path}")
-        plt.savefig(power_scaled_output_path, dpi=300, bbox_inches="tight")
-        plt.close(fig2)  # 關閉圖表以釋放記憶體
+        # 繪製單一的統一圖
+        logger.info(f"繪製統一的延遲多普勒圖")
+        fig = plt.figure(figsize=figsize)
+        fig.suptitle("Delay-Doppler Plots")  # 標題使用原始設置
+
+        for idx, (Z, label) in enumerate(zip(grids, labels), start=1):
+            ax = fig.add_subplot(rows, cols, idx, projection="3d")
+            # 使用與原始相同的色彩映射 viridis
+            ax.plot_surface(x_grid, y_grid, Z, cmap="viridis", edgecolor="none")
+            ax.set_title(f"Delay–Doppler |{label}|", pad=8)
+            ax.set_xlabel("Delay (ns)")
+            ax.set_ylabel("Doppler (Hz)")
+            ax.set_zlabel("|H|")
+            ax.set_zlim(z_min, z_max)
+            # 移除自定義視角設置，使用默認視角
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
 
         # 檢查文件是否生成成功
-        unscaled_success = (
-            os.path.exists(unscaled_output_path)
-            and os.path.getsize(unscaled_output_path) > 0
-        )
-        power_scaled_success = (
-            os.path.exists(power_scaled_output_path)
-            and os.path.getsize(power_scaled_output_path) > 0
-        )
-
-        if unscaled_success and power_scaled_success:
-            logger.info("成功生成兩張延遲多普勒圖")
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.info(f"成功生成延遲多普勒圖: {output_path}")
             return True
         else:
-            if not unscaled_success:
-                logger.error(f"未縮放圖片生成失敗: {unscaled_output_path}")
-            if not power_scaled_success:
-                logger.error(f"功率縮放圖片生成失敗: {power_scaled_output_path}")
+            logger.error(f"圖片生成失敗: {output_path}")
             return False
 
     except Exception as e:
@@ -1560,6 +1535,11 @@ async def generate_channel_response_plots(
     logger.info("開始生成通道響應圖...")
 
     try:
+        # 刪除舊的圖檔 (如果存在)
+        if os.path.exists(output_path):
+            logger.info(f"刪除舊的通道響應圖檔: {output_path}")
+            os.remove(output_path)
+
         # 從資料庫獲取活動的發射器 (desired)
         logger.info("從數據庫獲取活動的發射器...")
         active_desired = await crud_device.get_devices_by_role(

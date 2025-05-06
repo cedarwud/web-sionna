@@ -263,7 +263,6 @@
 
 .view-image {
   max-width: 90%;
-  max-height: 70vh;
   border-radius: 4px;
   margin: 10px 0;
   object-fit: contain;
@@ -276,6 +275,23 @@
   width: 100%;
   gap: 20px;
   align-items: center;
+}
+
+/* v2 版本的延遲多普勒圖樣式 */
+.doppler-image-v2 {
+  width: 100%;
+  max-width: 100%;
+}
+
+.image-item.doppler-image-v2 {
+  width: 100%;
+  max-width: 1400px; /* 更大的最大寬度以填充更多空間 */
+}
+
+.view-image.doppler-image-v2 {
+  max-width: 100%;
+  width: 100%;
+  object-fit: contain;
 }
 
 .image-item {
