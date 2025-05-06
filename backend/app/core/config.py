@@ -67,6 +67,12 @@ POWER_SCALED_DOPPLER_IMAGE_PATH = (
     OUTPUT_DIR / "power_scaled_delay_doppler.png"
 )  # 新增: 功率縮放的延遲多普勒圖路徑
 
+# 新增: 通道響應圖路徑
+CHANNEL_RESPONSE_IMAGE_PATH = OUTPUT_DIR / "channel_response_plots.png"
+logger.info(
+    f"Channel Response Plots Image Path (in container): {CHANNEL_RESPONSE_IMAGE_PATH}"
+)
+
 # logger.info(f"Project Root (estimated): {PROJECT_ROOT}") # 不再需要
 logger.info(f"Static Directory (in container): {STATIC_DIR}")
 logger.info(f"Models Directory (in container): {MODELS_DIR}")

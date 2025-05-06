@@ -21,6 +21,7 @@ from app.services.sionna_simulation import (  # Import service functions
     generate_cfr_plot,  # 新增: 導入剛添加的 CFR 繪圖函數
     generate_sinr_map,  # 新增: 導入 SINR 地圖生成函數
     generate_doppler_plots,  # 新增: 導入延遲多普勒圖生成函數
+    generate_channel_response_plots,  # 新增: 導入通道響應圖生成函數
 )
 from app.core.config import (  # Import constants
     SCENE_WITH_PATHS_IMAGE_PATH,
@@ -31,7 +32,10 @@ from app.core.config import (  # Import constants
     SINR_MAP_IMAGE_PATH,  # 新增: 導入 SINR 地圖路徑
     UNSCALED_DOPPLER_IMAGE_PATH,  # 新增: 導入未縮放的延遲多普勒圖路徑
     POWER_SCALED_DOPPLER_IMAGE_PATH,  # 新增: 導入功率縮放的延遲多普勒圖路徑
+    CHANNEL_RESPONSE_IMAGE_PATH,  # 新增: 導入通道響應圖路徑
 )
+from app.crud import crud_device  # 新增: 導入 crud_device 以獲取設備資料
+from app.db.models import DeviceRole  # 新增: 導入 DeviceRole 枚舉
 
 # 新增: 導入 run_in_threadpool
 from fastapi.concurrency import run_in_threadpool
@@ -1435,5 +1439,73 @@ async def get_power_scaled_doppler_image(session: AsyncSession = Depends(get_ses
         media_type="image/png",
         headers={
             "Content-Disposition": f"attachment; filename=power_scaled_delay_doppler.png"
+        },
+    )
+
+
+# 新增通道響應圖端點
+@router.get("/channel-response-plots", tags=["Sionna Simulation"])
+async def get_channel_response_plots(session: AsyncSession = Depends(get_session)):
+    """
+    生成並返回通道響應圖，顯示 H_des、H_jam 和 H_all 的三維圖。
+    從資料庫中獲取發射器和接收器數據，必須有至少一個活動的發射器和接收器。
+    """
+    logger.info("--- API Request: /channel-response-plots ---")
+
+    # 檢查資料庫中是否有足夠的設備
+    active_desired = await crud_device.get_devices_by_role(
+        db=session, role=DeviceRole.DESIRED.value, active_only=True
+    )
+    active_receivers = await crud_device.get_devices_by_role(
+        db=session, role=DeviceRole.RECEIVER.value, active_only=True
+    )
+
+    if not active_desired:
+        logger.error("沒有活動的發射器")
+        raise HTTPException(
+            status_code=400,
+            detail="需要至少一個活動的發射器才能生成通道響應圖。請在資料庫中添加並啟用發射器。",
+        )
+
+    if not active_receivers:
+        logger.error("沒有活動的接收器")
+        raise HTTPException(
+            status_code=400,
+            detail="需要至少一個活動的接收器才能生成通道響應圖。請在資料庫中添加並啟用接收器。",
+        )
+
+    # 檢查文件是否已經存在
+    if (
+        not os.path.exists(CHANNEL_RESPONSE_IMAGE_PATH)
+        or os.path.getsize(CHANNEL_RESPONSE_IMAGE_PATH) == 0
+    ):
+        logger.info("通道響應圖不存在或為空，正在生成...")
+        success = await generate_channel_response_plots(
+            session,
+            str(CHANNEL_RESPONSE_IMAGE_PATH),
+        )
+        if not success:
+            logger.error("生成通道響應圖失敗")
+            raise HTTPException(status_code=500, detail="生成通道響應圖失敗")
+
+    # 再次檢查文件是否存在
+    if not os.path.exists(CHANNEL_RESPONSE_IMAGE_PATH):
+        logger.error(f"文件生成後仍不存在: {CHANNEL_RESPONSE_IMAGE_PATH}")
+        raise HTTPException(status_code=500, detail="通道響應圖生成失敗")
+
+    # 使用StreamingResponse返回文件
+    def iterfile():
+        with open(CHANNEL_RESPONSE_IMAGE_PATH, "rb") as f:
+            # 每次讀取4KB
+            chunk = f.read(4096)
+            while chunk:
+                yield chunk
+                chunk = f.read(4096)
+
+    return StreamingResponse(
+        iterfile(),
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f"attachment; filename=channel_response_plots.png"
         },
     )

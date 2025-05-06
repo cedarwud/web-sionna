@@ -96,7 +96,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                             }`}
                             onClick={handleTimeFrequencyClick}
                         >
-                            Time-Frequency Surface Plot
+                            Channel Response Plots
                         </li>
                         <li
                             className={`navbar-item ${
@@ -190,7 +190,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                 </div>
             )}
 
-            {/* Time-Frequency 彈窗 */}
+            {/* Time-Frequency 彈窗 - 更新為 Channel Response Plots */}
             {showTimeFrequencyModal && (
                 <div
                     className="modal-backdrop"
@@ -201,7 +201,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="modal-header">
-                            <h3>Time-Frequency Surface Plot</h3>
+                            <h3>Channel Response Plots</h3>
                             <button
                                 className="close-button"
                                 onClick={closeTimeFrequencyModal}
@@ -625,49 +625,107 @@ const TimeFrequencyViewer = () => {
     const [isLoading, setIsLoading] = useState(true)
     const [imageUrl, setImageUrl] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
+    const [lastUpdate, setLastUpdate] = useState<string>('')
 
-    const IMAGE_PATH = '/static/images/tf.png'
+    // 使用 ref 來跟踪當前的 imageUrl，避免在 useCallback 中產生依賴
+    const imageUrlRef = useRef<string | null>(null)
 
+    // 後端API路徑
+    const API_PATH = '/api/v1/sionna/channel-response-plots'
+
+    // 記錄請求時間戳，用於顯示最後更新時間
+    const updateTimestamp = () => {
+        const now = new Date()
+        const timeString = now.toLocaleTimeString()
+        setLastUpdate(timeString)
+    }
+
+    // 同步 imageUrl 到 ref
     useEffect(() => {
-        setIsLoading(true)
+        imageUrlRef.current = imageUrl
+    }, [imageUrl])
 
-        fetch(IMAGE_PATH)
+    // 請求並加載通道響應圖
+    const loadChannelResponseImage = useCallback(() => {
+        setIsLoading(true)
+        setError(null)
+
+        // 向後端API發送請求以生成即時圖片
+        fetch(API_PATH)
             .then((response) => {
                 if (!response.ok) {
-                    throw new Error('無法載入 Time-Frequency Surface Plot')
+                    if (response.status === 400) {
+                        return response.json().then((data) => {
+                            throw new Error(
+                                data.detail ||
+                                    '需要至少一個活動的發射器和接收器'
+                            )
+                        })
+                    }
+                    throw new Error(
+                        `API 請求失敗: ${response.status} ${response.statusText}`
+                    )
                 }
                 return response.blob()
             })
             .then((blob) => {
+                // 清理舊的 URL
+                if (imageUrlRef.current) {
+                    URL.revokeObjectURL(imageUrlRef.current)
+                }
+
                 const url = URL.createObjectURL(blob)
                 setImageUrl(url)
                 setIsLoading(false)
+                updateTimestamp()
             })
             .catch((err) => {
-                console.error('載入 Time-Frequency Surface Plot 失敗:', err)
-                setError('無法載入 Time-Frequency Surface Plot: ' + err.message)
+                console.error('載入通道響應圖失敗:', err)
+                setError('無法載入通道響應圖: ' + err.message)
                 setIsLoading(false)
             })
+    }, [])
 
+    // 首次加載時獲取圖像
+    useEffect(() => {
+        loadChannelResponseImage()
+
+        // 清理函數
         return () => {
-            if (imageUrl) {
-                URL.revokeObjectURL(imageUrl)
+            if (imageUrlRef.current) {
+                URL.revokeObjectURL(imageUrlRef.current)
             }
         }
-    }, [])
+    }, [loadChannelResponseImage])
+
+    // 刷新按鈕處理函數
+    const handleRefresh = () => {
+        loadChannelResponseImage()
+    }
 
     return (
         <div className="image-viewer">
+            <div className="image-controls">
+                <button
+                    className="refresh-button"
+                    onClick={handleRefresh}
+                    disabled={isLoading}
+                >
+                    {isLoading ? '正在生成...' : '重新生成圖表'}
+                </button>
+                {lastUpdate && (
+                    <span className="last-update">最後更新: {lastUpdate}</span>
+                )}
+            </div>
+
             {isLoading && (
-                <div className="loading">
-                    正在載入 Time-Frequency Surface Plot...
-                </div>
+                <div className="loading">正在即時生成通道響應圖...</div>
             )}
             {error && <div className="error">{error}</div>}
             {imageUrl && (
                 <img
                     src={imageUrl}
-                    alt="Time-Frequency Surface Plot"
+                    alt="Channel Response Plots"
                     className="view-image"
                 />
             )}

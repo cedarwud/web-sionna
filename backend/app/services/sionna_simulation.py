@@ -2055,3 +2055,266 @@ async def generate_doppler_plots(
         # 確保關閉所有打開的圖表
         plt.close("all")
         return False
+
+
+# 新增函數: 整合 tf.py 的通道響應圖功能
+async def generate_channel_response_plots(
+    session: AsyncSession, output_path: str
+) -> bool:
+    """
+    生成通道響應圖 (H_des, H_jam, H_all)，基於 tf.py 中的功能。
+    從資料庫獲取接收器、發射器和干擾器參數。
+    """
+    logger.info("開始生成通道響應圖...")
+
+    try:
+        # 從資料庫獲取活動的發射器 (desired)
+        logger.info("從數據庫獲取活動的發射器...")
+        active_desired = await crud_device.get_devices_by_role(
+            db=session, role=DeviceRole.DESIRED.value, active_only=True
+        )
+
+        # 從資料庫獲取活動的干擾器 (jammer)
+        logger.info("從數據庫獲取活動的干擾器...")
+        active_jammers = await crud_device.get_devices_by_role(
+            db=session, role=DeviceRole.JAMMER.value, active_only=True
+        )
+
+        # 從資料庫獲取活動的接收器
+        logger.info("從數據庫獲取活動的接收器...")
+        active_receivers = await crud_device.get_devices_by_role(
+            db=session, role=DeviceRole.RECEIVER.value, active_only=True
+        )
+
+        # 檢查是否有足夠的設備進行模擬
+        if not active_desired:
+            logger.error("沒有活動的發射器，無法生成通道響應圖")
+            return False
+
+        if not active_receivers:
+            logger.error("沒有活動的接收器，無法生成通道響應圖")
+            return False
+
+        # 構建 TX_LIST
+        tx_list = []
+
+        # 添加從資料庫獲取的發射器
+        for tx in active_desired:
+            tx_name = tx.name
+            tx_position = [tx.position_x, tx.position_y, tx.position_z]
+            tx_orientation = [tx.orientation_x, tx.orientation_y, tx.orientation_z]
+            tx_power = tx.power_dbm
+
+            tx_list.append((tx_name, tx_position, tx_orientation, "desired", tx_power))
+            logger.info(
+                f"添加發射器: {tx_name}, 位置: {tx_position}, 方向: {tx_orientation}, 功率: {tx_power} dBm"
+            )
+
+        # 添加從資料庫獲取的干擾器 (如果有)
+        for jammer in active_jammers:
+            jammer_name = jammer.name
+            jammer_position = [
+                jammer.position_x,
+                jammer.position_y,
+                jammer.position_z,
+            ]
+            jammer_orientation = [
+                jammer.orientation_x,
+                jammer.orientation_y,
+                jammer.orientation_z,
+            ]
+            jammer_power = jammer.power_dbm
+
+            tx_list.append(
+                (
+                    jammer_name,
+                    jammer_position,
+                    jammer_orientation,
+                    "jammer",
+                    jammer_power,
+                )
+            )
+            logger.info(
+                f"添加干擾器: {jammer_name}, 位置: {jammer_position}, 方向: {jammer_orientation}, 功率: {jammer_power} dBm"
+            )
+
+        # 接收器設置
+        receiver = active_receivers[0]  # 已確認有接收器
+        rx_config = (
+            receiver.name,
+            [receiver.position_x, receiver.position_y, receiver.position_z],
+        )
+        logger.info(f"使用接收器 '{rx_config[0]}' 在位置 {rx_config[1]}")
+
+        # 從 config.py 取得場景路徑
+        scene_name = str(NYCU_XML_PATH)
+        logger.info(f"從 {scene_name} 加載場景")
+
+        # 參數設置 (從 tf.py 移植)
+        tx_array_config = {
+            "num_rows": 1,
+            "num_cols": 1,
+            "vertical_spacing": 0.5,
+            "horizontal_spacing": 0.5,
+            "pattern": "iso",
+            "polarization": "V",
+        }
+        rx_array_config = tx_array_config
+
+        pathsolver_args = {
+            "max_depth": 10,
+            "los": True,
+            "specular_reflection": True,
+            "diffuse_reflection": False,
+            "refraction": False,
+            "synthetic_array": False,
+            "seed": 41,
+        }
+
+        n_subcarriers = 1024
+        subcarrier_spacing = 30e3
+        num_ofdm_symbols = 1024
+
+        # 場景設置
+        logger.info("設置場景")
+        scene = load_scene(scene_name)
+        scene.tx_array = PlanarArray(**tx_array_config)
+        scene.rx_array = PlanarArray(**rx_array_config)
+
+        # 清除現有的發射器和接收器
+        for name in list(scene.transmitters.keys()) + list(scene.receivers.keys()):
+            scene.remove(name)
+
+        # 添加發射器
+        logger.info("添加發射器和干擾器")
+
+        def add_tx(scene, name, pos, ori, role, power_dbm):
+            tx = SionnaTransmitter(
+                name=name, position=pos, orientation=ori, power_dbm=power_dbm
+            )
+            tx.role = role
+            scene.add(tx)
+            return tx
+
+        for name, pos, ori, role, p_dbm in tx_list:
+            add_tx(scene, name, pos, ori, role, p_dbm)
+
+        # 添加接收器
+        rx_name, rx_pos = rx_config
+        logger.info(f"添加接收器 '{rx_name}' 在位置 {rx_pos}")
+        scene.add(SionnaReceiver(name=rx_name, position=rx_pos))
+
+        # 為所有發射器分配速度
+        for name, tx in scene.transmitters.items():
+            tx.velocity = [30, 0, 0]
+
+        # 按角色分組發射器
+        tx_names = list(scene.transmitters.keys())
+        all_txs = [scene.get(n) for n in tx_names]
+        idx_des = [
+            i for i, tx in enumerate(all_txs) if getattr(tx, "role", None) == "desired"
+        ]
+        idx_jam = [
+            i for i, tx in enumerate(all_txs) if getattr(tx, "role", None) == "jammer"
+        ]
+
+        # 計算路徑
+        logger.info("計算路徑")
+        solver = PathSolver()
+        try:
+            paths = solver(scene, **pathsolver_args)
+        except RuntimeError as e:
+            logger.error(f"PathSolver 錯誤: {e}")
+            logger.error(
+                "嘗試減少 max_depth, max_num_paths_per_src, 或使用更簡單的場景。"
+            )
+            return False
+
+        # 計算 CFR
+        logger.info("計算 CFR")
+        freqs = subcarrier_frequencies(n_subcarriers, subcarrier_spacing)
+        ofdm_symbol_duration = 1 / subcarrier_spacing
+
+        H_unit = paths.cfr(
+            frequencies=freqs,
+            sampling_frequency=1 / ofdm_symbol_duration,
+            num_time_steps=num_ofdm_symbols,
+            normalize_delays=True,
+            normalize=False,
+            out_type="numpy",
+        ).squeeze()  # shape: (num_tx, T, F)
+
+        # 計算 H_all, H_des, H_jam
+        logger.info("計算 H_all, H_des, H_jam")
+        H_all = H_unit.sum(axis=0)
+
+        # 安全檢查：確保有所需的發射器和干擾器
+        H_des = np.zeros_like(H_all)
+        if idx_des:
+            H_des = H_unit[idx_des].sum(axis=0)
+
+        H_jam = np.zeros_like(H_all)
+        if idx_jam:
+            H_jam = H_unit[idx_jam].sum(axis=0)
+
+        # 準備繪圖網格
+        logger.info("準備繪圖")
+        T, F = H_des.shape
+        t_axis = np.arange(T)
+        f_axis = np.arange(F)
+        T_mesh, F_mesh = np.meshgrid(t_axis, f_axis, indexing="ij")
+
+        # 創建圖片並保存
+        logger.info("繪製通道響應圖")
+        fig = plt.figure(figsize=(18, 5))
+
+        # 子圖 1: H_des
+        ax1 = fig.add_subplot(131, projection="3d")
+        ax1.plot_surface(
+            F_mesh, T_mesh, np.abs(H_des), cmap="viridis", edgecolor="none"
+        )
+        ax1.set_xlabel("子載波")
+        ax1.set_ylabel("OFDM 符號")
+        ax1.set_title("‖H_des‖")
+
+        # 子圖 2: H_jam
+        ax2 = fig.add_subplot(132, projection="3d")
+        ax2.plot_surface(
+            F_mesh, T_mesh, np.abs(H_jam), cmap="viridis", edgecolor="none"
+        )
+        ax2.set_xlabel("子載波")
+        ax2.set_ylabel("OFDM 符號")
+        ax2.set_title("‖H_jam‖")
+
+        # 子圖 3: H_all
+        ax3 = fig.add_subplot(133, projection="3d")
+        ax3.plot_surface(
+            F_mesh, T_mesh, np.abs(H_all), cmap="viridis", edgecolor="none"
+        )
+        ax3.set_xlabel("子載波")
+        ax3.set_ylabel("OFDM 符號")
+        ax3.set_title("‖H_all‖")
+
+        plt.tight_layout()
+
+        # 確保輸出目錄存在
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        # 保存圖片
+        logger.info(f"保存通道響應圖到 {output_path}")
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+        # 檢查文件是否生成成功
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.info(f"成功保存通道響應圖到 {output_path}")
+            return True
+        else:
+            logger.error(f"保存通道響應圖到 {output_path} 失敗或文件為空")
+            return False
+
+    except Exception as e:
+        logger.exception(f"生成通道響應圖時發生錯誤: {e}")
+        # 確保關閉所有打開的圖表
+        plt.close("all")
+        return False
