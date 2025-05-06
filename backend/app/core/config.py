@@ -56,7 +56,6 @@ OUTPUT_DIR = STATIC_IMAGES_DIR
 
 # 圖片檔案完整路徑 (使用 Path 對象)
 SCENE_WITH_PATHS_IMAGE_PATH = OUTPUT_DIR / "scene_with_paths.png"
-CONSTELLATION_IMAGE_PATH = OUTPUT_DIR / "constellation_diagram.png"
 EMPTY_SCENE_IMAGE_PATH = OUTPUT_DIR / "empty_scene.png"
 CFR_PLOT_IMAGE_PATH = OUTPUT_DIR / "cfr_plot.png"  # 新增: CFR 圖像路徑
 SINR_MAP_IMAGE_PATH = OUTPUT_DIR / "sinr_map.png"  # 新增: SINR 地圖路徑
@@ -86,7 +85,6 @@ logger.info(f"Default GLB Path (in container): {GLB_PATH}")
 logger.info(
     f"Scene with Paths Image Path (in container): {SCENE_WITH_PATHS_IMAGE_PATH}"
 )
-logger.info(f"Constellation Image Path (in container): {CONSTELLATION_IMAGE_PATH}")
 logger.info(
     f"CFR Plot Image Path (in container): {CFR_PLOT_IMAGE_PATH}"
 )  # 新增: 記錄 CFR 圖像路徑

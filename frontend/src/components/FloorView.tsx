@@ -937,7 +937,6 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                 console.log(`Calling deleteDevice for ID: ${editingDeviceId}`)
                 await deleteDevice(editingDeviceId)
                 console.log('Device deleted successfully')
-                alert(`成功刪除設備: ${popoverDevice.name}`)
 
                 handleClosePopover()
                 fetchImage(new AbortController().signal) // 更新場景圖
@@ -1120,6 +1119,15 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
             }
         }
 
+        // 彈窗內 role select onChange 時自動更新 name
+        const handlePopoverRoleChange = (newRole: string) => {
+            setPopoverDevice((prev) => ({
+                ...prev,
+                role: newRole,
+                name: generateDeviceName(newRole, propDevices),
+            }))
+        }
+
         return (
             <div
                 style={{
@@ -1220,10 +1228,8 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                                 <select
                                                     value={popoverDevice.role}
                                                     onChange={(e) =>
-                                                        handlePopoverInputChange(
-                                                            'role',
-                                                            e.target
-                                                                .value as string
+                                                        handlePopoverRoleChange(
+                                                            e.target.value
                                                         )
                                                     }
                                                     className="device-type-select"
@@ -1376,14 +1382,14 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                             <div className="action-buttons">
                                 <button
                                     onClick={handleApplyPopover}
-                                    className="apply-button"
+                                    className="add-device-btn"
                                     disabled={!popoverDevice.name}
                                 >
                                     套用
                                 </button>
                                 <button
                                     onClick={handleClosePopover}
-                                    className="cancel-button"
+                                    className="add-device-btn"
                                 >
                                     取消
                                 </button>

@@ -4,8 +4,7 @@ import SceneView from './components/StereogramView'
 import Layout from './components/Layout'
 import Sidebar from './components/Sidebar'
 import Navbar from './components/Navbar'
-import SceneViewer from './components/Flooriew'
-import ConstellationViewer from './components/ConstellationView'
+import SceneViewer from './components/FloorView'
 import './App.css'
 import {
     Device as BackendDevice,
@@ -410,7 +409,7 @@ function App() {
                 case 'receiver':
                     return 'rx'
                 case 'jammer':
-                    return 'jammer'
+                    return 'jam'
                 default:
                     return 'device'
             }
@@ -465,7 +464,7 @@ function App() {
                 const deviceToUpdate = prev.find((d) => d.id === id)
                 if (deviceToUpdate) {
                     const currentName = deviceToUpdate.name
-                    const isDefaultNamingFormat = /^(tx|rx|jammer)\d+$/.test(
+                    const isDefaultNamingFormat = /^(tx|rx|jam)\d+$/.test(
                         currentName
                     )
                     const newRole = value as string
@@ -479,7 +478,7 @@ function App() {
                                 case 'receiver':
                                     return 'rx'
                                 case 'jammer':
-                                    return 'jammer'
+                                    return 'jam'
                                 default:
                                     return 'device'
                             }
@@ -632,8 +631,6 @@ function App() {
                         onUAVPositionUpdate={handleUAVPositionUpdate}
                     />
                 )
-            case 'constellation':
-                return <ConstellationViewer />
             default:
                 return (
                     <SceneViewer

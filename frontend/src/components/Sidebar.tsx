@@ -151,6 +151,195 @@ const Sidebar: React.FC<SidebarProps> = ({
         onManualControl(null)
     }
 
+    // 分組設備
+    const tempDevices = devices.filter(
+        (device) => device.id == null || device.id < 0
+    )
+    const receiverDevices = devices.filter(
+        (device) =>
+            device.id != null && device.id >= 0 && device.role === 'receiver'
+    )
+    const desiredDevices = devices.filter(
+        (device) =>
+            device.id != null && device.id >= 0 && device.role === 'desired'
+    )
+    const jammerDevices = devices.filter(
+        (device) =>
+            device.id != null && device.id >= 0 && device.role === 'jammer'
+    )
+
+    const renderDeviceItem = (device: Device) => (
+        <div key={device.id} className="device-item">
+            <div className="device-header">
+                <input
+                    type="text"
+                    value={device.name}
+                    onChange={(e) =>
+                        onDeviceChange(device.id, 'name', e.target.value)
+                    }
+                    className="device-name-input"
+                />
+                <button
+                    className="delete-btn"
+                    onClick={() => onDeleteDevice(device.id)}
+                >
+                    &#10006;
+                </button>
+            </div>
+            <div className="device-content">
+                <table className="device-table">
+                    <thead>
+                        <tr>
+                            <th>類型</th>
+                            <th>X 位置</th>
+                            <th>Y 位置</th>
+                            <th>Z 位置</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>
+                                <select
+                                    value={device.role}
+                                    onChange={(e) =>
+                                        onDeviceChange(
+                                            device.id,
+                                            'role',
+                                            e.target.value
+                                        )
+                                    }
+                                    className="device-type-select"
+                                >
+                                    <option value="desired">發射器</option>
+                                    <option value="jammer">干擾源</option>
+                                    <option value="receiver">接收器</option>
+                                </select>
+                            </td>
+                            <td>
+                                <input
+                                    type="number"
+                                    value={device.position_x}
+                                    onChange={(e) =>
+                                        onDeviceChange(
+                                            device.id,
+                                            'position_x',
+                                            parseFloat(e.target.value) || 0
+                                        )
+                                    }
+                                />
+                            </td>
+                            <td>
+                                <input
+                                    type="number"
+                                    value={device.position_y}
+                                    onChange={(e) =>
+                                        onDeviceChange(
+                                            device.id,
+                                            'position_y',
+                                            parseFloat(e.target.value) || 0
+                                        )
+                                    }
+                                />
+                            </td>
+                            <td>
+                                <input
+                                    type="number"
+                                    value={device.position_z}
+                                    onChange={(e) =>
+                                        onDeviceChange(
+                                            device.id,
+                                            'position_z',
+                                            parseInt(e.target.value, 10) || 0
+                                        )
+                                    }
+                                />
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                {device.role !== 'receiver' && (
+                    <table className="device-table orientation-table">
+                        <thead>
+                            <tr>
+                                <th>功率 (dBm)</th>
+                                <th>X 方向</th>
+                                <th>Y 方向</th>
+                                <th>Z 方向</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <input
+                                        type="number"
+                                        value={device.power_dbm || 0}
+                                        onChange={(e) =>
+                                            onDeviceChange(
+                                                device.id,
+                                                'power_dbm',
+                                                parseInt(e.target.value, 10) ||
+                                                    0
+                                            )
+                                        }
+                                    />
+                                </td>
+                                <td>
+                                    <input
+                                        type="text"
+                                        value={
+                                            orientationInputs[device.id]?.x ||
+                                            '0'
+                                        }
+                                        onChange={(e) =>
+                                            handleOrientationInput(
+                                                device.id,
+                                                'x',
+                                                e.target.value
+                                            )
+                                        }
+                                    />
+                                </td>
+                                <td>
+                                    <input
+                                        type="text"
+                                        value={
+                                            orientationInputs[device.id]?.y ||
+                                            '0'
+                                        }
+                                        onChange={(e) =>
+                                            handleOrientationInput(
+                                                device.id,
+                                                'y',
+                                                e.target.value
+                                            )
+                                        }
+                                    />
+                                </td>
+                                <td>
+                                    <input
+                                        type="text"
+                                        value={
+                                            orientationInputs[device.id]?.z ||
+                                            '0'
+                                        }
+                                        onChange={(e) =>
+                                            handleOrientationInput(
+                                                device.id,
+                                                'z',
+                                                e.target.value
+                                            )
+                                        }
+                                    />
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                )}
+            </div>
+        </div>
+    )
+
     return (
         <div className="sidebar-container">
             {activeComponent !== '2DRT' && (
@@ -349,239 +538,116 @@ const Sidebar: React.FC<SidebarProps> = ({
                 )}
             </div>
 
-            <div className="action-buttons">
-                <button
-                    onClick={onApply}
-                    disabled={
-                        loading ||
-                        apiStatus !== 'connected' ||
-                        !hasTempDevices ||
-                        auto
-                    }
-                    className="apply-button"
-                >
-                    套用
-                </button>
-                <button
-                    onClick={onCancel}
-                    disabled={loading}
-                    className="cancel-button"
-                >
-                    取消
-                </button>
-            </div>
-
-            <div className="devices-list">
-                {[...devices]
-                    .sort((a, b) =>
-                        a.role === 'receiver'
-                            ? -1
-                            : b.role === 'receiver'
-                            ? 1
-                            : 0
-                    )
-                    .map((device) => (
-                        <div key={device.id} className="device-item">
-                            <div className="device-header">
-                                <input
-                                    type="text"
-                                    value={device.name}
-                                    onChange={(e) =>
-                                        onDeviceChange(
-                                            device.id,
-                                            'name',
-                                            e.target.value
-                                        )
-                                    }
-                                    className="device-name-input"
-                                />
-                                <button
-                                    className="delete-btn"
-                                    onClick={() => onDeleteDevice(device.id)}
-                                >
-                                    &#10006;
-                                </button>
-                            </div>
-                            <div className="device-content">
-                                <table className="device-table">
-                                    <thead>
-                                        <tr>
-                                            <th>類型</th>
-                                            <th>X 位置</th>
-                                            <th>Y 位置</th>
-                                            <th>Z 位置</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td>
-                                                <select
-                                                    value={device.role}
-                                                    onChange={(e) =>
-                                                        onDeviceChange(
-                                                            device.id,
-                                                            'role',
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                    className="device-type-select"
-                                                >
-                                                    <option value="desired">
-                                                        發射器
-                                                    </option>
-                                                    <option value="jammer">
-                                                        干擾源
-                                                    </option>
-                                                    <option value="receiver">
-                                                        接收器
-                                                    </option>
-                                                </select>
-                                            </td>
-                                            <td>
-                                                <input
-                                                    type="number"
-                                                    value={device.position_x}
-                                                    onChange={(e) =>
-                                                        onDeviceChange(
-                                                            device.id,
-                                                            'position_x',
-                                                            parseFloat(
-                                                                e.target.value
-                                                            ) || 0
-                                                        )
-                                                    }
-                                                />
-                                            </td>
-                                            <td>
-                                                <input
-                                                    type="number"
-                                                    value={device.position_y}
-                                                    onChange={(e) =>
-                                                        onDeviceChange(
-                                                            device.id,
-                                                            'position_y',
-                                                            parseFloat(
-                                                                e.target.value
-                                                            ) || 0
-                                                        )
-                                                    }
-                                                />
-                                            </td>
-                                            <td>
-                                                <input
-                                                    type="number"
-                                                    value={device.position_z}
-                                                    onChange={(e) =>
-                                                        onDeviceChange(
-                                                            device.id,
-                                                            'position_z',
-                                                            parseInt(
-                                                                e.target.value,
-                                                                10
-                                                            ) || 0
-                                                        )
-                                                    }
-                                                />
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-
-                                {device.role !== 'receiver' && (
-                                    <table className="device-table orientation-table">
-                                        <thead>
-                                            <tr>
-                                                <th>功率 (dBm)</th>
-                                                <th>X 方向</th>
-                                                <th>Y 方向</th>
-                                                <th>Z 方向</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr>
-                                                <td>
-                                                    <input
-                                                        type="number"
-                                                        value={
-                                                            device.power_dbm ||
-                                                            0
-                                                        }
-                                                        onChange={(e) =>
-                                                            onDeviceChange(
-                                                                device.id,
-                                                                'power_dbm',
-                                                                parseInt(
-                                                                    e.target
-                                                                        .value,
-                                                                    10
-                                                                ) || 0
-                                                            )
-                                                        }
-                                                    />
-                                                </td>
-                                                <td>
-                                                    <input
-                                                        type="text"
-                                                        value={
-                                                            orientationInputs[
-                                                                device.id
-                                                            ]?.x || '0'
-                                                        }
-                                                        onChange={(e) =>
-                                                            handleOrientationInput(
-                                                                device.id,
-                                                                'x',
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                    />
-                                                </td>
-                                                <td>
-                                                    <input
-                                                        type="text"
-                                                        value={
-                                                            orientationInputs[
-                                                                device.id
-                                                            ]?.y || '0'
-                                                        }
-                                                        onChange={(e) =>
-                                                            handleOrientationInput(
-                                                                device.id,
-                                                                'y',
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                    />
-                                                </td>
-                                                <td>
-                                                    <input
-                                                        type="text"
-                                                        value={
-                                                            orientationInputs[
-                                                                device.id
-                                                            ]?.z || '0'
-                                                        }
-                                                        onChange={(e) =>
-                                                            handleOrientationInput(
-                                                                device.id,
-                                                                'z',
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                    />
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-            </div>
-            <div className="add-device-container">
+            <div
+                className="sidebar-actions-combined"
+                style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    paddingTop: '10px', // Preserve some top padding
+                    paddingBottom: '10px', // Add some bottom padding
+                    borderBottom: '1px solid var(--dark-border)', // Optional: add a separator line
+                    marginBottom: '10px', // Optional: add some margin below
+                }}
+            >
                 <button onClick={onAddDevice} className="add-device-btn">
                     添加設備
                 </button>
+                <div>
+                    <button
+                        onClick={onApply}
+                        disabled={
+                            loading ||
+                            apiStatus !== 'connected' ||
+                            !hasTempDevices ||
+                            auto
+                        }
+                        className="add-device-btn"
+                        style={{ marginRight: '8px' }} // Add some space between apply and cancel
+                    >
+                        套用
+                    </button>
+                    <button
+                        onClick={onCancel}
+                        disabled={loading}
+                        className="add-device-btn"
+                    >
+                        取消
+                    </button>
+                </div>
+            </div>
+
+            <div className="devices-list">
+                {/* 新增設備區塊 */}
+                {tempDevices.length > 0 && (
+                    <>
+                        <h3
+                            style={{
+                                marginTop: '10px',
+                                marginBottom: '5px',
+                                paddingTop: '10px',
+                                borderTop: '1px solid var(--dark-border)',
+                            }}
+                        >
+                            新增設備
+                        </h3>
+                        {tempDevices.map(renderDeviceItem)}
+                    </>
+                )}
+                {/* 接收器 (Rx) */}
+                {receiverDevices.length > 0 && (
+                    <>
+                        <h3
+                            style={{
+                                marginTop:
+                                    tempDevices.length > 0 ? '20px' : '10px',
+                                marginBottom: '5px',
+                                paddingTop: '10px',
+                                borderTop:
+                                    desiredDevices.length > 0 ||
+                                    jammerDevices.length > 0 ||
+                                    tempDevices.length > 0
+                                        ? '1px solid var(--dark-border)'
+                                        : 'none',
+                            }}
+                        >
+                            接收器 (Rx)
+                        </h3>
+                        {receiverDevices.map(renderDeviceItem)}
+                    </>
+                )}
+                {/* 發射器 (Tx) */}
+                {desiredDevices.length > 0 && (
+                    <>
+                        <h3
+                            style={{
+                                marginTop: '20px',
+                                marginBottom: '5px',
+                                paddingTop: '10px',
+                                borderTop: '1px solid var(--dark-border)',
+                            }}
+                        >
+                            發射器 (Tx)
+                        </h3>
+                        {desiredDevices.map(renderDeviceItem)}
+                    </>
+                )}
+                {/* 干擾源 (Jam) */}
+                {jammerDevices.length > 0 && (
+                    <>
+                        <h3
+                            style={{
+                                marginTop: '20px',
+                                marginBottom: '5px',
+                                paddingTop: '10px',
+                                borderTop: '1px solid var(--dark-border)',
+                            }}
+                        >
+                            干擾源 (Jam)
+                        </h3>
+                        {jammerDevices.map(renderDeviceItem)}
+                    </>
+                )}
             </div>
         </div>
     )
