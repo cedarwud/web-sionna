@@ -1017,7 +1017,7 @@ export default function SceneView({
             {/* 3D Canvas內容照舊，會蓋在星空上 */}
             <Canvas
                 shadows
-                camera={{ position: [40, 70, 100], near: 0.1, far: 1e4 }}
+                camera={{ position: [40, 80, 120], near: 0.1, far: 1e4 }}
                 gl={{
                     toneMapping: THREE.ACESFilmicToneMapping,
                     toneMappingExposure: 1.2,
