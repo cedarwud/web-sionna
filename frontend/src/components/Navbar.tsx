@@ -96,7 +96,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                             }`}
                             onClick={handleTimeFrequencyClick}
                         >
-                            Channel Response Plots
+                            Time-Frequency Surface Plot
                         </li>
                         <li
                             className={`navbar-item ${
@@ -190,7 +190,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                 </div>
             )}
 
-            {/* Time-Frequency 彈窗 - 更新為 Channel Response Plots */}
+            {/* Time-Frequency 彈窗 - 更新為 Time-Frequency Surface Plot */}
             {showTimeFrequencyModal && (
                 <div
                     className="modal-backdrop"
@@ -201,7 +201,7 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="modal-header">
-                            <h3>Channel Response Plots</h3>
+                            <h3>Time-Frequency Surface Plot</h3>
                             <button
                                 className="close-button"
                                 onClick={closeTimeFrequencyModal}
@@ -675,14 +675,14 @@ const TimeFrequencyViewer = () => {
 
             {isLoading && (
                 <div className="loading">
-                    正在即時運算並生成 Channel Response Plots...
+                    正在即時運算並生成 Time-Frequency Surface Plot...
                 </div>
             )}
             {error && <div className="error">{error}</div>}
             {imageUrl && (
                 <img
                     src={imageUrl}
-                    alt="Channel Response Plots"
+                    alt="Time-Frequency Surface Plot"
                     className="view-image"
                 />
             )}

@@ -69,10 +69,10 @@ POWER_SCALED_DOPPLER_IMAGE_PATH = (
 # v2 版本的單一多普勒圖路徑
 DOPPLER_IMAGE_PATH = OUTPUT_DIR / "delay_doppler.png"  # 新版本: 統一的延遲多普勒圖路徑
 
-# 新增: Channel Response Plots
+# 新增: Time-Frequency Surface Plot
 CHANNEL_RESPONSE_IMAGE_PATH = OUTPUT_DIR / "channel_response_plots.png"
 logger.info(
-    f"Channel Response Plots Image Path (in container): {CHANNEL_RESPONSE_IMAGE_PATH}"
+    f"Time-Frequency Surface Plot Image Path (in container): {CHANNEL_RESPONSE_IMAGE_PATH}"
 )
 
 # logger.info(f"Project Root (estimated): {PROJECT_ROOT}") # 不再需要
