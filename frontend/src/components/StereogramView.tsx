@@ -694,10 +694,12 @@ function StaticModel({
     url,
     position,
     scale,
+    pivotOffset = [0, 0, 0], // 新增 pivotOffset 屬性，並提供預設值
 }: {
     url: string
     position: [number, number, number]
     scale: [number, number, number]
+    pivotOffset?: [number, number, number] // 將 pivotOffset 設為可選
 }) {
     const { scene } = useGLTF(url) as any
 
@@ -726,19 +728,24 @@ function StaticModel({
     }, [scene])
 
     return (
-        <primitive
-            object={clonedScene}
-            position={position}
-            scale={scale}
-            onUpdate={(self: THREE.Object3D) =>
-                self.traverse((child: THREE.Object3D) => {
-                    if ((child as THREE.Mesh).isMesh) {
-                        child.castShadow = true
-                        child.receiveShadow = true
-                    }
-                })
-            }
-        />
+        <group position={position} scale={scale}>
+            {' '}
+            {/* 外層 group 控制整體位置和縮放 */}
+            <primitive
+                object={clonedScene}
+                position={
+                    pivotOffset
+                } /* 內層 primitive 使用 pivotOffset 來調整基準點 */
+                onUpdate={(self: THREE.Object3D) =>
+                    self.traverse((child: THREE.Object3D) => {
+                        if ((child as THREE.Mesh).isMesh) {
+                            child.castShadow = true
+                            child.receiveShadow = true
+                        }
+                    })
+                }
+            />
+        </group>
     )
 }
 
@@ -844,6 +851,7 @@ function Etoile({
                             device.position_y,
                         ]}
                         scale={[0.05, 0.05, 0.05]}
+                        pivotOffset={[0, -900, 0]}
                     />
                 )
             } else if (device.role === 'jammer') {
@@ -857,6 +865,7 @@ function Etoile({
                             device.position_y,
                         ]}
                         scale={[0.005, 0.005, 0.005]}
+                        pivotOffset={[0, -8970, 0]}
                     />
                 )
             } else {

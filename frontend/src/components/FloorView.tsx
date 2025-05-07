@@ -1270,20 +1270,30 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                                     device.position_y
                                 )
                                 if (!coords) return null
-                                let color = '#ff2196F3'
-                                if (device.role === 'jammer') color = '#E53935'
-                                else if (device.role === 'desired')
-                                    color = '#222'
-                                else if (device.role === 'receiver')
-                                    color = '#888'
+                                let fillColor = '#ff2196F3' // 預設填充顏色
+                                let strokeColor = '#fff' // 預設外框顏色
+
+                                if (device.role === 'jammer') {
+                                    fillColor = '#E53935' // 干擾源紅色填充
+                                } else if (device.role === 'desired') {
+                                    // tx (發射器)
+                                    fillColor = '#222' // 深灰色填充
+                                    strokeColor = 'yellow' // 黃色外框
+                                } else if (device.role === 'receiver') {
+                                    // rx (接收器)
+                                    fillColor = '#FFA500' // 橙色填充 (例如 FFA500)
+                                    // 外框顏色保持預設的白色
+                                }
+                                // 其他角色使用預設的 fillColor 和 strokeColor
+
                                 return (
                                     <circle
                                         key={device.id}
                                         cx={coords.x}
                                         cy={coords.y}
                                         r={10}
-                                        fill={color}
-                                        stroke="#fff"
+                                        fill={fillColor}
+                                        stroke={strokeColor}
                                         strokeWidth={1.5}
                                         style={{
                                             opacity: 0.95,
