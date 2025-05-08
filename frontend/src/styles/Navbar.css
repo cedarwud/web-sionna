@@ -195,6 +195,61 @@
   text-align: center;
 }
 
+/* 新增：彈窗標題中的最後更新時間樣式 */
+.last-update-header {
+    position: absolute;
+    right: 60px; /* 調整此值以確保在關閉按鈕左側 */
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.8rem;
+    color: #cccccc; /* 淺灰色 */
+    white-space: nowrap; /* 防止換行 */
+    opacity: 0.7; /* 稍微透明 */
+}
+
+/* 新增：可刷新的彈窗標題樣式 */
+.modal-title-refreshable {
+  font-size: 1.2rem; /* Match original h3 size */
+  font-weight: 500; /* Match original h3 weight */
+  color: white; /* Match original h3 color */
+  cursor: pointer;
+  padding: 0; /* Remove padding from container */
+  border-radius: 4px;
+  transition: none; /* Remove transition from container */
+  user-select: none; /* Prevent text selection */
+  text-align: center;
+  margin: 0 10px; /* Keep margin for spacing */
+}
+
+.modal-title-refreshable:hover:not(.loading) {
+  /* background-color: #4285f4; */ /* REMOVE hover background from main div */
+  /* color: white; */ /* REMOVE hover color from main div */
+}
+
+/* Apply hover styles ONLY to the inner span */
+.modal-title-refreshable:hover:not(.loading) span {
+  background-color: #4285f4;
+  color: white;
+  padding: 3px 8px; /* Adjust padding for the span */
+  border-radius: 4px;
+  display: inline-block; /* Allow background/padding */
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.modal-title-refreshable.loading {
+  /* background-color: #a0a0a0; */ /* 註釋掉：恢復默認背景 */
+  cursor: not-allowed;
+}
+
+/* Ensure loading state resets span styles if needed */
+.modal-title-refreshable.loading span {
+    background-color: transparent !important; 
+    color: inherit !important; 
+    padding: 0 !important;
+    display: inline; /* Reset display */
+    border-radius: 0; 
+}
+
 .close-button {
   background: none;
   border: none;
@@ -401,4 +456,23 @@
   margin: 0 auto;
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* SINR Map 專用樣式 - 移除容器特定樣式 */
+/* .sinr-image-container {
+    flex-grow: 1; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    overflow: hidden; 
+    width: 100%; 
+} */
+
+/* 修改 SINR 圖片樣式，直接限制最大高度 */
+.sinr-view-image {
+    max-height: calc(90vh - 120px); /* 90vh - header(60px) - padding(2*30px) */
+    max-width: 100%; 
+    width: auto; 
+    height: auto; 
+    object-fit: contain; 
 } 

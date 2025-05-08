@@ -281,7 +281,14 @@ def _render_crop_and_save(
     try:
         renderer = pyrender.OffscreenRenderer(render_width, render_height)
         color, _ = renderer.render(pr_scene)
-        renderer.delete()
+
+        # 安全地釋放 renderer 資源，捕獲可能的 GLError
+        try:
+            renderer.delete()
+        except Exception as delete_err:
+            # 這是已知的 EGL 問題，不影響渲染結果，可以忽略
+            pass
+
         logger.info("Rendering complete.")
     except Exception as render_err:
         logger.error(f"Pyrender OffscreenRenderer failed: {render_err}", exc_info=True)
@@ -876,7 +883,7 @@ async def generate_cfr_plot(
 
         ax[2].plot(np.abs(h_main), label="|H_main|")
         ax[2].plot(np.abs(h_intf), label="|H_intf|")
-        ax[2].set(title="Constellation & CFR", xlabel="Subcarrier Index")
+        ax[2].set(title="CFR Magnitude", xlabel="Subcarrier Index")
         ax[2].legend()
         ax[2].grid(True)
 

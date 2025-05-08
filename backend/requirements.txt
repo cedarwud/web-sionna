@@ -5,7 +5,10 @@ Pillow
 sionna
 sionna-rt
 trimesh
-pyrender
+pyrender>=0.1.45  # 確保使用較新版本，支持多種渲染後端
+pyglet>=2.0.0  # 為 pyrender 提供渲染支持
+PyOpenGL>=3.1.0  # OpenGL 支持
+PyOpenGL_accelerate  # 可選但建議，提高 OpenGL 性能
 python-multipart  # 支援表單數據和文件上傳
 
 # --- 新增資料庫相關套件 ---

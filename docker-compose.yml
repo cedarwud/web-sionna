@@ -1,4 +1,8 @@
 # docker-compose.yml
+# GPU/CPU 模式切換指南:
+# 1. 使用 CPU 模式: 設定 CUDA_VISIBLE_DEVICES="-1" 且註釋掉 deploy 部分
+# 2. 使用 GPU 模式: 設定 CUDA_VISIBLE_DEVICES="" 或指定 GPU ID，並啟用 deploy 部分
+# 3. 可選渲染後端: PYOPENGL_PLATFORM=egl (默認) 或 PYOPENGL_PLATFORM=osmesa 或 PYOPENGL_PLATFORM=glfw
 
 services:
   db: # <-- 新增 PostgreSQL + PostGIS 服務
@@ -35,18 +39,31 @@ services:
       - ./.env # 從項目根目錄的 .env 讀取配置
       - ./backend/.env # 同時也加載 backend/.env 文件
     environment:
-      # 原有的環境變數
-      CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-}
-      # --- 新增：資料庫連接 URL ---
-      # 使用 docker-compose 內部的服務名稱 'db'
+      # === 渲染和計算模式設定 ===
+      # CPU 模式：設定為 "-1" 強制使用 CPU
+      # GPU 模式：設定為 "" 或特定 GPU ID，如 "0" 或 "0,1"
+      CUDA_VISIBLE_DEVICES: "-1"
+      
+      # === 渲染後端設定 ===
+      # 支持三種模式：egl (默認), osmesa (純軟體), glfw (需要顯示器或虛擬顯示器)
+      PYOPENGL_PLATFORM: "egl"
+      # 可選設定 pyrender 的後端
+      PYRENDER_BACKEND: "pyglet"
+      
+      # 其他通用設定
+      PYTHONUNBUFFERED: "1"
+      # 資料庫連接 URL
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-    deploy: # 如果需要 GPU 支持
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    
+    # === GPU 支持 (使用 GPU 模式時取消註釋) ===
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    
     networks:
       - sionna-net
     depends_on: # <-- 讓 FastAPI 服務等待 DB 服務啟動 (healthcheck 更可靠)

@@ -6,12 +6,53 @@ interface NavbarProps {
     activeComponent: string
 }
 
+// Props for Viewer components
+interface ViewerProps {
+    onReportLastUpdateToNavbar?: (time: string) => void // For header last update
+    // New props for Navbar to control refresh from header title
+    reportRefreshHandlerToNavbar: (handler: () => void) => void
+    reportIsLoadingToNavbar: (isLoading: boolean) => void
+}
+
 const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
     const [isMenuOpen, setIsMenuOpen] = useState(false)
     const [showCFRModal, setShowCFRModal] = useState(false)
     const [showDelayDopplerModal, setShowDelayDopplerModal] = useState(false)
     const [showTimeFrequencyModal, setShowTimeFrequencyModal] = useState(false)
     const [showSINRModal, setShowSINRModal] = useState(false)
+
+    // State for last update times for each modal header
+    const [sinrModalLastUpdate, setSinrModalLastUpdate] = useState<string>('')
+    const [cfrModalLastUpdate, setCfrModalLastUpdate] = useState<string>('')
+    const [delayDopplerModalLastUpdate, setDelayDopplerModalLastUpdate] =
+        useState<string>('')
+    const [timeFrequencyModalLastUpdate, setTimeFrequencyModalLastUpdate] =
+        useState<string>('')
+
+    // Refs for refresh handlers and states for loading status & hover for header titles
+    const sinrRefreshHandlerRef = useRef<(() => void) | null>(null)
+    const [sinrIsLoadingForHeader, setSinrIsLoadingForHeader] =
+        useState<boolean>(true)
+    const [isSinrTitleHovered, setIsSinrTitleHovered] = useState<boolean>(false)
+
+    const cfrRefreshHandlerRef = useRef<(() => void) | null>(null)
+    const [cfrIsLoadingForHeader, setCfrIsLoadingForHeader] =
+        useState<boolean>(true)
+    const [isCfrTitleHovered, setIsCfrTitleHovered] = useState<boolean>(false)
+
+    const delayDopplerRefreshHandlerRef = useRef<(() => void) | null>(null)
+    const [delayDopplerIsLoadingForHeader, setDelayDopplerIsLoadingForHeader] =
+        useState<boolean>(true)
+    const [isDelayDopplerTitleHovered, setIsDelayDopplerTitleHovered] =
+        useState<boolean>(false)
+
+    const timeFrequencyRefreshHandlerRef = useRef<(() => void) | null>(null)
+    const [
+        timeFrequencyIsLoadingForHeader,
+        setTimeFrequencyIsLoadingForHeader,
+    ] = useState<boolean>(true)
+    const [isTimeFrequencyTitleHovered, setIsTimeFrequencyTitleHovered] =
+        useState<boolean>(false)
 
     const toggleMenu = () => {
         setIsMenuOpen(!isMenuOpen)
@@ -126,7 +167,41 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="modal-header">
-                            <h3>SINR Map</h3>
+                            <div
+                                className={`modal-title-refreshable ${
+                                    sinrIsLoadingForHeader ? 'loading' : ''
+                                }`}
+                                onClick={() => {
+                                    if (
+                                        !sinrIsLoadingForHeader &&
+                                        sinrRefreshHandlerRef.current
+                                    ) {
+                                        sinrRefreshHandlerRef.current()
+                                    }
+                                }}
+                                onMouseEnter={() => setIsSinrTitleHovered(true)}
+                                onMouseLeave={() =>
+                                    setIsSinrTitleHovered(false)
+                                }
+                                title={
+                                    sinrIsLoadingForHeader
+                                        ? '正在生成...'
+                                        : '點擊以重新生成圖表'
+                                }
+                            >
+                                <span>
+                                    {sinrIsLoadingForHeader
+                                        ? '正在即時運算並生成 SINR Map...'
+                                        : isSinrTitleHovered
+                                        ? '重新生成圖表'
+                                        : 'SINR Map'}
+                                </span>
+                            </div>
+                            {sinrModalLastUpdate && (
+                                <span className="last-update-header">
+                                    最後更新: {sinrModalLastUpdate}
+                                </span>
+                            )}
                             <button
                                 className="close-button"
                                 onClick={closeSINRModal}
@@ -135,7 +210,17 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                             </button>
                         </div>
                         <div className="modal-content">
-                            <SINRViewer />
+                            <SINRViewer
+                                onReportLastUpdateToNavbar={
+                                    setSinrModalLastUpdate
+                                }
+                                reportRefreshHandlerToNavbar={(handler) => {
+                                    sinrRefreshHandlerRef.current = handler
+                                }}
+                                reportIsLoadingToNavbar={
+                                    setSinrIsLoadingForHeader
+                                }
+                            />
                         </div>
                     </div>
                 </div>
@@ -149,7 +234,39 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="modal-header">
-                            <h3>Constellation & CFR</h3>
+                            <div
+                                className={`modal-title-refreshable ${
+                                    cfrIsLoadingForHeader ? 'loading' : ''
+                                }`}
+                                onClick={() => {
+                                    if (
+                                        !cfrIsLoadingForHeader &&
+                                        cfrRefreshHandlerRef.current
+                                    ) {
+                                        cfrRefreshHandlerRef.current()
+                                    }
+                                }}
+                                onMouseEnter={() => setIsCfrTitleHovered(true)}
+                                onMouseLeave={() => setIsCfrTitleHovered(false)}
+                                title={
+                                    cfrIsLoadingForHeader
+                                        ? '正在生成...'
+                                        : '點擊以重新生成圖表'
+                                }
+                            >
+                                <span>
+                                    {cfrIsLoadingForHeader
+                                        ? '正在即時運算並生成 Constellation & CFR...'
+                                        : isCfrTitleHovered
+                                        ? '重新生成圖表'
+                                        : 'Constellation & CFR Magnitude'}
+                                </span>
+                            </div>
+                            {cfrModalLastUpdate && (
+                                <span className="last-update-header">
+                                    最後更新: {cfrModalLastUpdate}
+                                </span>
+                            )}
                             <button
                                 className="close-button"
                                 onClick={closeCFRModal}
@@ -158,7 +275,17 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                             </button>
                         </div>
                         <div className="modal-content">
-                            <CFRViewer />
+                            <CFRViewer
+                                onReportLastUpdateToNavbar={
+                                    setCfrModalLastUpdate
+                                }
+                                reportRefreshHandlerToNavbar={(handler) => {
+                                    cfrRefreshHandlerRef.current = handler
+                                }}
+                                reportIsLoadingToNavbar={
+                                    setCfrIsLoadingForHeader
+                                }
+                            />
                         </div>
                     </div>
                 </div>
@@ -175,7 +302,45 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="modal-header">
-                            <h3>Delay–Doppler</h3>
+                            <div
+                                className={`modal-title-refreshable ${
+                                    delayDopplerIsLoadingForHeader
+                                        ? 'loading'
+                                        : ''
+                                }`}
+                                onClick={() => {
+                                    if (
+                                        !delayDopplerIsLoadingForHeader &&
+                                        delayDopplerRefreshHandlerRef.current
+                                    ) {
+                                        delayDopplerRefreshHandlerRef.current()
+                                    }
+                                }}
+                                onMouseEnter={() =>
+                                    setIsDelayDopplerTitleHovered(true)
+                                }
+                                onMouseLeave={() =>
+                                    setIsDelayDopplerTitleHovered(false)
+                                }
+                                title={
+                                    delayDopplerIsLoadingForHeader
+                                        ? '正在生成...'
+                                        : '點擊以重新生成圖表'
+                                }
+                            >
+                                <span>
+                                    {delayDopplerIsLoadingForHeader
+                                        ? '正在即時運算並生成 Delay-Doppler...'
+                                        : isDelayDopplerTitleHovered
+                                        ? '重新生成圖表'
+                                        : 'Delay-Doppler Plots'}
+                                </span>
+                            </div>
+                            {delayDopplerModalLastUpdate && (
+                                <span className="last-update-header">
+                                    最後更新: {delayDopplerModalLastUpdate}
+                                </span>
+                            )}
                             <button
                                 className="close-button"
                                 onClick={closeDelayDopplerModal}
@@ -184,7 +349,18 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                             </button>
                         </div>
                         <div className="modal-content">
-                            <DelayDopplerViewer />
+                            <DelayDopplerViewer
+                                onReportLastUpdateToNavbar={
+                                    setDelayDopplerModalLastUpdate
+                                }
+                                reportRefreshHandlerToNavbar={(handler) => {
+                                    delayDopplerRefreshHandlerRef.current =
+                                        handler
+                                }}
+                                reportIsLoadingToNavbar={
+                                    setDelayDopplerIsLoadingForHeader
+                                }
+                            />
                         </div>
                     </div>
                 </div>
@@ -201,7 +377,45 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="modal-header">
-                            <h3>Time-Frequency</h3>
+                            <div
+                                className={`modal-title-refreshable ${
+                                    timeFrequencyIsLoadingForHeader
+                                        ? 'loading'
+                                        : ''
+                                }`}
+                                onClick={() => {
+                                    if (
+                                        !timeFrequencyIsLoadingForHeader &&
+                                        timeFrequencyRefreshHandlerRef.current
+                                    ) {
+                                        timeFrequencyRefreshHandlerRef.current()
+                                    }
+                                }}
+                                onMouseEnter={() =>
+                                    setIsTimeFrequencyTitleHovered(true)
+                                }
+                                onMouseLeave={() =>
+                                    setIsTimeFrequencyTitleHovered(false)
+                                }
+                                title={
+                                    timeFrequencyIsLoadingForHeader
+                                        ? '正在生成...'
+                                        : '點擊以重新生成圖表'
+                                }
+                            >
+                                <span>
+                                    {timeFrequencyIsLoadingForHeader
+                                        ? '正在即時運算並生成 Time-Frequency...'
+                                        : isTimeFrequencyTitleHovered
+                                        ? '重新生成圖表'
+                                        : 'Time-Frequency Plots'}
+                                </span>
+                            </div>
+                            {timeFrequencyModalLastUpdate && (
+                                <span className="last-update-header">
+                                    最後更新: {timeFrequencyModalLastUpdate}
+                                </span>
+                            )}
                             <button
                                 className="close-button"
                                 onClick={closeTimeFrequencyModal}
@@ -210,7 +424,18 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
                             </button>
                         </div>
                         <div className="modal-content">
-                            <TimeFrequencyViewer />
+                            <TimeFrequencyViewer
+                                onReportLastUpdateToNavbar={
+                                    setTimeFrequencyModalLastUpdate
+                                }
+                                reportRefreshHandlerToNavbar={(handler) => {
+                                    timeFrequencyRefreshHandlerRef.current =
+                                        handler
+                                }}
+                                reportIsLoadingToNavbar={
+                                    setTimeFrequencyIsLoadingForHeader
+                                }
+                            />
                         </div>
                     </div>
                 </div>
@@ -220,43 +445,36 @@ const Navbar: React.FC<NavbarProps> = ({ onMenuClick, activeComponent }) => {
 }
 
 // SINR Map 顯示組件
-const SINRViewer = () => {
+const SINRViewer: React.FC<ViewerProps> = ({
+    onReportLastUpdateToNavbar,
+    reportRefreshHandlerToNavbar,
+    reportIsLoadingToNavbar,
+}) => {
     const [isLoading, setIsLoading] = useState(true)
     const [imageUrl, setImageUrl] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [lastUpdate, setLastUpdate] = useState<string>('')
     const [sinrVmin, setSinrVmin] = useState<number>(-40)
     const [sinrVmax, setSinrVmax] = useState<number>(0)
     const [cellSize, setCellSize] = useState<number>(1.0)
     const [samplesPerTx, setSamplesPerTx] = useState<number>(10 ** 7)
 
-    // 使用 ref 來跟踪當前的 imageUrl，避免在 useCallback 中產生依賴
     const imageUrlRef = useRef<string | null>(null)
-
-    // 後端API路徑
     const API_PATH = '/api/v1/sionna/sinr-map'
 
-    // 記錄請求時間戳，用於顯示最後更新時間
-    const updateTimestamp = () => {
+    const updateTimestamp = useCallback(() => {
         const now = new Date()
         const timeString = now.toLocaleTimeString()
-        setLastUpdate(timeString)
-    }
+        onReportLastUpdateToNavbar?.(timeString)
+    }, [onReportLastUpdateToNavbar])
 
-    // 同步 imageUrl 到 ref
     useEffect(() => {
         imageUrlRef.current = imageUrl
     }, [imageUrl])
 
-    // 請求並加載 SINR Map 圖
     const loadSINRMapImage = useCallback(() => {
         setIsLoading(true)
         setError(null)
-
-        // 構建 API URL 包含參數
         const apiUrl = `${API_PATH}?sinr_vmin=${sinrVmin}&sinr_vmax=${sinrVmax}&cell_size=${cellSize}&samples_per_tx=${samplesPerTx}`
-
-        // 向後端API發送請求以生成即時圖片
         fetch(apiUrl)
             .then((response) => {
                 if (!response.ok) {
@@ -267,11 +485,9 @@ const SINRViewer = () => {
                 return response.blob()
             })
             .then((blob) => {
-                // 清理舊的 URL
                 if (imageUrlRef.current) {
                     URL.revokeObjectURL(imageUrlRef.current)
                 }
-
                 const url = URL.createObjectURL(blob)
                 setImageUrl(url)
                 setIsLoading(false)
@@ -282,13 +498,18 @@ const SINRViewer = () => {
                 setError('無法載入 SINR Map: ' + err.message)
                 setIsLoading(false)
             })
-    }, [sinrVmin, sinrVmax, cellSize, samplesPerTx])
+    }, [sinrVmin, sinrVmax, cellSize, samplesPerTx, updateTimestamp])
 
-    // 首次加載時獲取圖像
+    useEffect(() => {
+        reportRefreshHandlerToNavbar(loadSINRMapImage)
+    }, [loadSINRMapImage, reportRefreshHandlerToNavbar])
+
+    useEffect(() => {
+        reportIsLoadingToNavbar(isLoading)
+    }, [isLoading, reportIsLoadingToNavbar])
+
     useEffect(() => {
         loadSINRMapImage()
-
-        // 清理函數
         return () => {
             if (imageUrlRef.current) {
                 URL.revokeObjectURL(imageUrlRef.current)
@@ -296,86 +517,62 @@ const SINRViewer = () => {
         }
     }, [loadSINRMapImage])
 
-    // 處理 SINR 參數變更
     const handleSinrVminChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setSinrVmin(Number(e.target.value))
     }
-
     const handleSinrVmaxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setSinrVmax(Number(e.target.value))
     }
-
     const handleCellSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setCellSize(Number(e.target.value))
     }
-
     const handleSamplesChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         setSamplesPerTx(Number(e.target.value))
     }
 
-    // 刷新按鈕處理函數
-    const handleRefresh = () => {
-        loadSINRMapImage()
-    }
-
     return (
-        <div className="image-viewer">
-            {/* 控制面板 */}
-            <div className="image-controls">
-                <button
-                    className="refresh-button"
-                    onClick={handleRefresh}
-                    disabled={isLoading}
-                >
-                    {isLoading ? '正在生成...' : '重新生成圖表'}
-                </button>
-                {lastUpdate && (
-                    <span className="last-update">最後更新: {lastUpdate}</span>
-                )}
-            </div>
-
+        <div className="image-viewer sinr-image-container">
             {isLoading && (
                 <div className="loading">正在即時運算並生成 SINR Map...</div>
             )}
             {error && <div className="error">{error}</div>}
             {imageUrl && (
-                <img src={imageUrl} alt="SINR Map" className="view-image" />
+                <img
+                    src={imageUrl}
+                    alt="SINR Map"
+                    className="view-image sinr-view-image"
+                />
             )}
         </div>
     )
 }
 
 // Constellation & CFR 顯示組件
-const CFRViewer = () => {
+const CFRViewer: React.FC<ViewerProps> = ({
+    onReportLastUpdateToNavbar,
+    reportRefreshHandlerToNavbar,
+    reportIsLoadingToNavbar,
+}) => {
     const [isLoading, setIsLoading] = useState(true)
     const [imageUrl, setImageUrl] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [lastUpdate, setLastUpdate] = useState<string>('')
 
-    // 使用 ref 來跟踪當前的 imageUrl，避免在 useCallback 中產生依賴
     const imageUrlRef = useRef<string | null>(null)
-
-    // 後端API路徑
     const API_PATH = '/api/v1/sionna/cfr-plot'
 
-    // 記錄請求時間戳，用於顯示最後更新時間
-    const updateTimestamp = () => {
+    const updateTimestamp = useCallback(() => {
         const now = new Date()
         const timeString = now.toLocaleTimeString()
-        setLastUpdate(timeString)
-    }
+        onReportLastUpdateToNavbar?.(timeString)
+    }, [onReportLastUpdateToNavbar])
 
-    // 同步 imageUrl 到 ref
     useEffect(() => {
         imageUrlRef.current = imageUrl
     }, [imageUrl])
 
-    // 請求並加載 CFR 圖
     const loadCFRImage = useCallback(() => {
         setIsLoading(true)
         setError(null)
-
-        // 向後端API發送請求以生成即時圖片
         fetch(API_PATH)
             .then((response) => {
                 if (!response.ok) {
@@ -386,11 +583,9 @@ const CFRViewer = () => {
                 return response.blob()
             })
             .then((blob) => {
-                // 清理舊的 URL
                 if (imageUrlRef.current) {
                     URL.revokeObjectURL(imageUrlRef.current)
                 }
-
                 const url = URL.createObjectURL(blob)
                 setImageUrl(url)
                 setIsLoading(false)
@@ -401,13 +596,18 @@ const CFRViewer = () => {
                 setError('無法載入 Constellation & CFR: ' + err.message)
                 setIsLoading(false)
             })
-    }, [])
+    }, [updateTimestamp])
 
-    // 首次加載時獲取圖像
+    useEffect(() => {
+        reportRefreshHandlerToNavbar(loadCFRImage)
+    }, [loadCFRImage, reportRefreshHandlerToNavbar])
+
+    useEffect(() => {
+        reportIsLoadingToNavbar(isLoading)
+    }, [isLoading, reportIsLoadingToNavbar])
+
     useEffect(() => {
         loadCFRImage()
-
-        // 清理函數
         return () => {
             if (imageUrlRef.current) {
                 URL.revokeObjectURL(imageUrlRef.current)
@@ -415,26 +615,8 @@ const CFRViewer = () => {
         }
     }, [loadCFRImage])
 
-    // 刷新按鈕處理函數
-    const handleRefresh = () => {
-        loadCFRImage()
-    }
-
     return (
         <div className="image-viewer">
-            <div className="image-controls">
-                <button
-                    className="refresh-button"
-                    onClick={handleRefresh}
-                    disabled={isLoading}
-                >
-                    {isLoading ? '正在生成...' : '重新生成圖表'}
-                </button>
-                {lastUpdate && (
-                    <span className="last-update">最後更新: {lastUpdate}</span>
-                )}
-            </div>
-
             {isLoading && (
                 <div className="loading">
                     正在即時運算並生成 Constellation & CFR...
@@ -444,7 +626,7 @@ const CFRViewer = () => {
             {imageUrl && (
                 <img
                     src={imageUrl}
-                    alt="Constellation & CFR"
+                    alt="Constellation & CFR Magnitude"
                     className="view-image"
                 />
             )}
@@ -453,36 +635,31 @@ const CFRViewer = () => {
 }
 
 // Delay-Doppler 顯示組件
-const DelayDopplerViewer = () => {
+const DelayDopplerViewer: React.FC<ViewerProps> = ({
+    onReportLastUpdateToNavbar,
+    reportRefreshHandlerToNavbar,
+    reportIsLoadingToNavbar,
+}) => {
     const [isLoading, setIsLoading] = useState(true)
     const [imageUrl, setImageUrl] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [lastUpdate, setLastUpdate] = useState<string>('')
 
-    // 使用 ref 來跟踪當前的 imageUrl，避免在 useCallback 中產生依賴
     const imageUrlRef = useRef<string | null>(null)
-
-    // 後端API路徑 - 使用新的統一端點
     const API_PATH = '/api/v1/sionna/doppler-plots'
 
-    // 記錄請求時間戳，用於顯示最後更新時間
-    const updateTimestamp = () => {
+    const updateTimestamp = useCallback(() => {
         const now = new Date()
         const timeString = now.toLocaleTimeString()
-        setLastUpdate(timeString)
-    }
+        onReportLastUpdateToNavbar?.(timeString)
+    }, [onReportLastUpdateToNavbar])
 
-    // 同步 imageUrl 到 ref
     useEffect(() => {
         imageUrlRef.current = imageUrl
     }, [imageUrl])
 
-    // 請求並加載延遲多普勒圖
     const loadDopplerImage = useCallback(() => {
         setIsLoading(true)
         setError(null)
-
-        // 從 API 獲取新的多普勒圖資訊
         fetch(API_PATH)
             .then((response) => {
                 if (!response.ok) {
@@ -493,23 +670,21 @@ const DelayDopplerViewer = () => {
                 return response.json()
             })
             .then((data) => {
-                // 用獲得的 URL 載入圖片
-                return fetch('/api/v1/sionna/unscaled-doppler-image') // 使用舊的端點，但它現在會返回新的統一圖像
-                    .then((imgResponse) => {
+                return fetch('/api/v1/sionna/unscaled-doppler-image').then(
+                    (imgResponse) => {
                         if (!imgResponse.ok) {
                             throw new Error(
                                 `圖片請求失敗: ${imgResponse.status} ${imgResponse.statusText}`
                             )
                         }
                         return imgResponse.blob()
-                    })
+                    }
+                )
             })
             .then((blob) => {
-                // 清理舊的 URL
                 if (imageUrlRef.current) {
                     URL.revokeObjectURL(imageUrlRef.current)
                 }
-
                 const url = URL.createObjectURL(blob)
                 setImageUrl(url)
                 setIsLoading(false)
@@ -520,13 +695,18 @@ const DelayDopplerViewer = () => {
                 setError('無法載入延遲多普勒圖: ' + err.message)
                 setIsLoading(false)
             })
-    }, [])
+    }, [updateTimestamp])
 
-    // 首次加載時獲取圖像
+    useEffect(() => {
+        reportRefreshHandlerToNavbar(loadDopplerImage)
+    }, [loadDopplerImage, reportRefreshHandlerToNavbar])
+
+    useEffect(() => {
+        reportIsLoadingToNavbar(isLoading)
+    }, [isLoading, reportIsLoadingToNavbar])
+
     useEffect(() => {
         loadDopplerImage()
-
-        // 清理函數
         return () => {
             if (imageUrlRef.current) {
                 URL.revokeObjectURL(imageUrlRef.current)
@@ -534,26 +714,8 @@ const DelayDopplerViewer = () => {
         }
     }, [loadDopplerImage])
 
-    // 刷新按鈕處理函數
-    const handleRefresh = () => {
-        loadDopplerImage()
-    }
-
     return (
         <div className="image-viewer">
-            <div className="image-controls">
-                <button
-                    className="refresh-button"
-                    onClick={handleRefresh}
-                    disabled={isLoading}
-                >
-                    {isLoading ? '正在生成...' : '重新生成圖表'}
-                </button>
-                {lastUpdate && (
-                    <span className="last-update">最後更新: {lastUpdate}</span>
-                )}
-            </div>
-
             {isLoading && (
                 <div className="loading">
                     正在即時運算並生成 Delay-Doppler...
@@ -576,36 +738,31 @@ const DelayDopplerViewer = () => {
 }
 
 // Time-Frequency 顯示組件
-const TimeFrequencyViewer = () => {
+const TimeFrequencyViewer: React.FC<ViewerProps> = ({
+    onReportLastUpdateToNavbar,
+    reportRefreshHandlerToNavbar,
+    reportIsLoadingToNavbar,
+}) => {
     const [isLoading, setIsLoading] = useState(true)
     const [imageUrl, setImageUrl] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [lastUpdate, setLastUpdate] = useState<string>('')
 
-    // 使用 ref 來跟踪當前的 imageUrl，避免在 useCallback 中產生依賴
     const imageUrlRef = useRef<string | null>(null)
-
-    // 後端API路徑
     const API_PATH = '/api/v1/sionna/channel-response-plots'
 
-    // 記錄請求時間戳，用於顯示最後更新時間
-    const updateTimestamp = () => {
+    const updateTimestamp = useCallback(() => {
         const now = new Date()
         const timeString = now.toLocaleTimeString()
-        setLastUpdate(timeString)
-    }
+        onReportLastUpdateToNavbar?.(timeString)
+    }, [onReportLastUpdateToNavbar])
 
-    // 同步 imageUrl 到 ref
     useEffect(() => {
         imageUrlRef.current = imageUrl
     }, [imageUrl])
 
-    // 請求並加載通道響應圖
     const loadChannelResponseImage = useCallback(() => {
         setIsLoading(true)
         setError(null)
-
-        // 向後端API發送請求以生成即時圖片
         fetch(API_PATH)
             .then((response) => {
                 if (!response.ok) {
@@ -624,11 +781,9 @@ const TimeFrequencyViewer = () => {
                 return response.blob()
             })
             .then((blob) => {
-                // 清理舊的 URL
                 if (imageUrlRef.current) {
                     URL.revokeObjectURL(imageUrlRef.current)
                 }
-
                 const url = URL.createObjectURL(blob)
                 setImageUrl(url)
                 setIsLoading(false)
@@ -639,13 +794,18 @@ const TimeFrequencyViewer = () => {
                 setError('無法載入通道響應圖: ' + err.message)
                 setIsLoading(false)
             })
-    }, [])
+    }, [updateTimestamp])
 
-    // 首次加載時獲取圖像
+    useEffect(() => {
+        reportRefreshHandlerToNavbar(loadChannelResponseImage)
+    }, [loadChannelResponseImage, reportRefreshHandlerToNavbar])
+
+    useEffect(() => {
+        reportIsLoadingToNavbar(isLoading)
+    }, [isLoading, reportIsLoadingToNavbar])
+
     useEffect(() => {
         loadChannelResponseImage()
-
-        // 清理函數
         return () => {
             if (imageUrlRef.current) {
                 URL.revokeObjectURL(imageUrlRef.current)
@@ -653,26 +813,8 @@ const TimeFrequencyViewer = () => {
         }
     }, [loadChannelResponseImage])
 
-    // 刷新按鈕處理函數
-    const handleRefresh = () => {
-        loadChannelResponseImage()
-    }
-
     return (
         <div className="image-viewer">
-            <div className="image-controls">
-                <button
-                    className="refresh-button"
-                    onClick={handleRefresh}
-                    disabled={isLoading}
-                >
-                    {isLoading ? '正在生成...' : '重新生成圖表'}
-                </button>
-                {lastUpdate && (
-                    <span className="last-update">最後更新: {lastUpdate}</span>
-                )}
-            </div>
-
             {isLoading && (
                 <div className="loading">
                     正在即時運算並生成 Time-Frequency...

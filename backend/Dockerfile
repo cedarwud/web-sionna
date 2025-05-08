@@ -16,18 +16,19 @@ ENV PYTHONUNBUFFERED=1
 ENV TF_CPP_MIN_LOG_LEVEL="3"
 # 讓 Dr.Jit 能找到 LLVM shared lib
 ENV DRJIT_LIBLLVM_PATH=/usr/lib/x86_64-linux-gnu/libLLVM-14.so.1
-# 設定 PyOpenGL 使用 EGL
+# 設定 PyOpenGL 默認使用 EGL (可通過環境變數覆蓋)
 ENV PYOPENGL_PLATFORM=egl
 
-# 4. 安裝系統依賴（LLVM 開發＋運行時庫）
-#    - 原有的 LLVM 相關
-#    - 新增: build-essential, libpq-dev (PostgreSQL), gdal-bin, libgdal-dev (GDAL/PostGIS)
-#    - 新增: postgresql-client (用於 psql command, 可選但方便除錯)
-#    - 新增: postgis (PostGIS extension 相關工具, 通常由 postgis/postgis image 提供，但客戶端工具可能有幫助)
+# 4. 安裝系統依賴
+#    - 渲染相關：更完整的 OpenGL/EGL/OSMesa 支持
+#    - 資料庫相關：PostgreSQL, GDAL, PostGIS
 RUN apt update && apt install -y --no-install-recommends \
     libgl1-mesa-glx \
     libegl1-mesa \
+    libosmesa6 \
     libopengl0 \
+    libglfw3 \
+    xvfb \
     llvm-dev \
     libllvm14 \
     build-essential \
