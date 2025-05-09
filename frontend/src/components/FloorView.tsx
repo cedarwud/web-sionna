@@ -10,11 +10,17 @@ import {
     DeviceCreate,
     DeviceUpdate,
     Device as BackendDevice,
-    DeviceRole,
     getDeviceById,
 } from '../services/api' // <--- 確保只引入需要的內容
 import { Device } from '../App' // <--- 從 App 引入前端 Device 介面
 import '../styles/Sidebar.css' // 引入 Sidebar.css 以使用相同樣式
+import Starfield from './Starfield'
+import DeviceOverlaySVG from './DeviceOverlaySVG'
+import DevicePopover from './DevicePopover'
+import { imageToSceneCoords, sceneToImageCoords } from '../utils/coordinate'
+import { generateDeviceName } from '../utils/deviceName'
+import OrientationInput from './OrientationInput'
+import { useImageLoader } from '../hooks/useImageLoader'
 
 // 定義 Props 接口
 interface SceneViewerProps {
@@ -39,36 +45,6 @@ interface NewDevice {
 // 定義靜態路徑指向後端存儲的最後一次成功渲染的圖像
 const FALLBACK_IMAGE_PATH = '/rendered_images/scene_with_devices.png'
 
-// 星空星點數量
-const STAR_COUNT = 180
-
-// 定義星點型別
-interface Star {
-    left: number
-    top: number
-    size: number
-    baseOpacity: number
-    phase: number
-    speed: number
-    animOpacity: number
-}
-
-// 產生星點初始資料（只在初始渲染時產生一次）
-function createStars(): Star[] {
-    return Array.from({ length: STAR_COUNT }, () => {
-        const baseOpacity = Math.random() * 0.7 + 0.3
-        return {
-            left: Math.random() * 100,
-            top: Math.random() * 100,
-            size: Math.random() * 2 + 1,
-            baseOpacity,
-            phase: Math.random() * Math.PI * 2,
-            speed: Math.random() * 1.0 + 1.0, // 閃爍速度 1.0~2.0
-            animOpacity: baseOpacity,
-        }
-    })
-}
-
 // 添加座標轉換常量 - 統一管理座標轉換參數
 const COORDINATE_TRANSFORM = {
     offsetX: 579, // X轴偏移量
@@ -82,12 +58,6 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         // console.log('--- SceneViewer Component Rendered ---')
 
         // --- Start: Move helper functions inside component scope ---
-        // 轉換前端角色到後端角色
-        const getBackendRole = useCallback((frontendRole: string): string => {
-            // 前端和後端現在使用相同的值（desired/jammer/receiver）
-            return frontendRole
-        }, [])
-
         // 轉換後端設備到前端 NewDevice (用於 Popover)
         const convertBackendToNewDevice = useCallback(
             (backendDevice: BackendDevice): NewDevice => {
@@ -106,25 +76,6 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
             },
             []
         )
-
-        // 修正將後端設備轉換為前端設備的函數
-        // 在 convertBackendDeviceToFrontend 函數中
-        const convertBackendDeviceToFrontend = (
-            backendDevice: any
-        ): NewDevice => {
-            return {
-                name: backendDevice.name,
-                position_x: backendDevice.position_x,
-                position_y: backendDevice.position_y,
-                position_z: backendDevice.position_z,
-                orientation_x: backendDevice.orientation_x || 0, // 提供預設值
-                orientation_y: backendDevice.orientation_y || 0, // 提供預設值
-                orientation_z: backendDevice.orientation_z || 0, // 提供預設值
-                power_dbm: backendDevice.power_dbm || 0, // 提供預設值
-                active: backendDevice.active,
-                role: backendDevice.role,
-            }
-        }
         // --- End: Move helper functions inside component scope ---
 
         const [imageUrl, setImageUrl] = useState<string | null>(null)
@@ -149,7 +100,9 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
             sceneY?: number
         } | null>(null) // 專門用於傳遞給 CoordinateDisplay 的狀態
 
-        const imageRef = useRef<HTMLImageElement>(null)
+        const imageRef = useRef<HTMLImageElement>(
+            null
+        ) as React.RefObject<HTMLImageElement>
 
         // 新增彈出視窗相關狀態
         const [showPopover, setShowPopover] = useState<boolean>(false)
@@ -186,34 +139,6 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         const [orientationInputs, setOrientationInputs] = useState<{
             [key: string]: { x: string; y: string; z: string }
         }>({})
-
-        // 星空動畫狀態
-        const [starAnim, setStarAnim] = useState<Star[]>(() => createStars())
-        // 輕微閃爍動畫：每 60ms 更新一次透明度
-        useEffect(() => {
-            let mounted = true
-            let frame = 0
-            const interval = setInterval(() => {
-                if (!mounted) return
-                setStarAnim((prev) =>
-                    prev.map((star, i) => {
-                        // 用 baseOpacity 為中心，sin 波動幅度 0.5，速度不同
-                        const t = frame / 30 // 時間參數
-                        const flicker =
-                            Math.sin(t * star.speed + star.phase) * 0.5
-                        let opacity = star.baseOpacity + flicker
-                        // 限制在 0.15~1.0 之間
-                        opacity = Math.max(0.15, Math.min(1, opacity))
-                        return { ...star, animOpacity: opacity }
-                    })
-                )
-                frame++
-            }, 60)
-            return () => {
-                mounted = false
-                clearInterval(interval)
-            }
-        }, [])
 
         // 輔助函數：將圖像座標轉換為場景座標
         const imageToSceneCoords = useCallback(
@@ -1197,32 +1122,7 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                 }}
             >
                 {/* 星空星點層（在最底層，不影響互動） */}
-                <div
-                    style={{
-                        position: 'absolute',
-                        inset: 0,
-                        zIndex: 0,
-                        pointerEvents: 'none',
-                    }}
-                >
-                    {starAnim.map((star, i) => (
-                        <div
-                            key={i}
-                            style={{
-                                position: 'absolute',
-                                left: `${star.left}%`,
-                                top: `${star.top}%`,
-                                width: `${star.size}px`,
-                                height: `${star.size}px`,
-                                borderRadius: '50%',
-                                background: 'white',
-                                opacity: star.animOpacity,
-                                filter: 'blur(0.5px)',
-                                transition: 'opacity 0.2s linear',
-                            }}
-                        />
-                    ))}
-                </div>
+                <Starfield starCount={180} />
                 {/* 其餘內容照舊，zIndex > 0 的內容會蓋在星空上 */}
                 {isLoading && <p>Loading...</p>}
                 {/* 只有在 imageUrl 存在且 loading 完成後才顯示 img，或在 loading 時顯示佔位符 */}
@@ -1251,57 +1151,14 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
 
                     {/* 節點 SVG 覆蓋層 */}
                     {imageUrl && imageNaturalSize && imageRef.current && (
-                        <svg
-                            style={{
-                                position: 'absolute',
-                                left: 0,
-                                top: 0,
-                                pointerEvents: 'none', // 讓滑鼠事件穿透
-                                width: imageRef.current.offsetWidth,
-                                height: imageRef.current.offsetHeight,
-                                zIndex: 10,
-                            }}
-                            width={imageRef.current.offsetWidth}
-                            height={imageRef.current.offsetHeight}
-                        >
-                            {propDevices.map((device) => {
-                                const coords = sceneToImageCoords(
-                                    device.position_x,
-                                    device.position_y
-                                )
-                                if (!coords) return null
-                                let fillColor = '#ff2196F3' // 預設填充顏色
-                                let strokeColor = '#fff' // 預設外框顏色
-
-                                if (device.role === 'jammer') {
-                                    fillColor = '#E53935' // 干擾源紅色填充
-                                } else if (device.role === 'desired') {
-                                    // tx (發射器)
-                                    fillColor = '#222' // 深灰色填充
-                                    strokeColor = 'yellow' // 黃色外框
-                                } else if (device.role === 'receiver') {
-                                    // rx (接收器)
-                                    fillColor = '#FFA500' // 橙色填充 (例如 FFA500)
-                                    // 外框顏色保持預設的白色
-                                }
-                                // 其他角色使用預設的 fillColor 和 strokeColor
-
-                                return (
-                                    <circle
-                                        key={device.id}
-                                        cx={coords.x}
-                                        cy={coords.y}
-                                        r={10}
-                                        fill={fillColor}
-                                        stroke={strokeColor}
-                                        strokeWidth={1.5}
-                                        style={{
-                                            opacity: 0.95,
-                                        }}
-                                    />
-                                )
-                            })}
-                        </svg>
+                        <DeviceOverlaySVG
+                            devices={propDevices}
+                            imageRef={imageRef}
+                            imageNaturalSize={imageNaturalSize}
+                            sceneToImageCoords={sceneToImageCoords}
+                            hoveredDeviceId={hoveredDeviceId}
+                            onNodeClick={handleNodeClick}
+                        />
                     )}
 
                     {/* 座標顯示 - 使用獨立組件，並且只在 popover 不顯示時渲染 */}
@@ -1311,234 +1168,19 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
 
                     {/* 新增設備彈出視窗 - 更新為與 Sidebar 一致的樣式 */}
                     {showPopover && popoverPosition && (
-                        <div
-                            style={{
-                                position: 'fixed',
-                                background: '#1e2536',
-                                color: '#eaf6ff',
-                                boxShadow: '0 4px 24px 0 rgba(0,0,0,0.45)',
-                                borderRadius: '8px',
-                                border: '1px solid #3a4a6a',
-                                padding: '18px 18px 12px 18px',
-                                zIndex: 1000,
-                                left: `${popoverPosition.clientX}px`,
-                                top: `${popoverPosition.clientY + 10}px`,
-                                transform: 'translateX(-50%)',
-                                width: '340px',
-                                fontSize: '0.95rem',
-                            }}
-                        >
-                            {/* 設備名稱與關閉按鈕 */}
-                            <div className="device-header">
-                                <input
-                                    type="text"
-                                    value={popoverDevice.name}
-                                    onChange={(e) =>
-                                        handlePopoverInputChange(
-                                            'name',
-                                            e.target.value
-                                        )
-                                    }
-                                    placeholder="設備名稱"
-                                    className="device-name-input"
-                                />
-                                <button
-                                    className="delete-btn"
-                                    onClick={
-                                        isEditing
-                                            ? handleDeleteDevice
-                                            : handleClosePopover
-                                    }
-                                    title={isEditing ? '刪除設備' : '關閉'}
-                                >
-                                    &#10006;
-                                </button>
-                            </div>
-
-                            {/* 設備屬性表格 */}
-                            <div className="device-content">
-                                <table className="device-table">
-                                    <thead>
-                                        <tr>
-                                            <th>類型</th>
-                                            <th>X 位置</th>
-                                            <th>Y 位置</th>
-                                            <th>Z 位置</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td>
-                                                <select
-                                                    value={popoverDevice.role}
-                                                    onChange={(e) =>
-                                                        handlePopoverRoleChange(
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                    className="device-type-select"
-                                                >
-                                                    <option value="desired">
-                                                        發射器
-                                                    </option>
-                                                    <option value="jammer">
-                                                        干擾源
-                                                    </option>
-                                                    <option value="receiver">
-                                                        接收器
-                                                    </option>
-                                                </select>
-                                            </td>
-                                            <td>
-                                                <input
-                                                    type="number"
-                                                    value={
-                                                        popoverDevice.position_x
-                                                    }
-                                                    onChange={(e) =>
-                                                        handlePopoverInputChange(
-                                                            'position_x',
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                />
-                                            </td>
-                                            <td>
-                                                <input
-                                                    type="number"
-                                                    value={
-                                                        popoverDevice.position_y
-                                                    }
-                                                    onChange={(e) =>
-                                                        handlePopoverInputChange(
-                                                            'position_y',
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                />
-                                            </td>
-                                            <td>
-                                                <input
-                                                    type="number"
-                                                    value={
-                                                        popoverDevice.position_z
-                                                    }
-                                                    onChange={(e) =>
-                                                        handlePopoverInputChange(
-                                                            'position_z',
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                    step="0.1"
-                                                />
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-
-                                {/* 方向和功率設定表格 - 僅當角色不是接收器時顯示 */}
-                                {popoverDevice.role !== 'receiver' && (
-                                    <table className="device-table orientation-table">
-                                        <thead>
-                                            <tr>
-                                                <th>功率 (dBm)</th>
-                                                <th>X 方向</th>
-                                                <th>Y 方向</th>
-                                                <th>Z 方向</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr>
-                                                <td>
-                                                    <input
-                                                        type="number"
-                                                        value={
-                                                            popoverDevice.power_dbm ||
-                                                            0
-                                                        }
-                                                        onChange={(e) =>
-                                                            handlePopoverInputChange(
-                                                                'power_dbm',
-                                                                parseInt(
-                                                                    e.target
-                                                                        .value,
-                                                                    10
-                                                                ) || 0
-                                                            )
-                                                        }
-                                                    />
-                                                </td>
-                                                <td>
-                                                    <input
-                                                        type="text"
-                                                        value={
-                                                            orientationInputs[
-                                                                'popover'
-                                                            ]?.x || '0'
-                                                        }
-                                                        onChange={(e) =>
-                                                            handleOrientationInput(
-                                                                'x',
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                    />
-                                                </td>
-                                                <td>
-                                                    <input
-                                                        type="text"
-                                                        value={
-                                                            orientationInputs[
-                                                                'popover'
-                                                            ]?.y || '0'
-                                                        }
-                                                        onChange={(e) =>
-                                                            handleOrientationInput(
-                                                                'y',
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                    />
-                                                </td>
-                                                <td>
-                                                    <input
-                                                        type="text"
-                                                        value={
-                                                            orientationInputs[
-                                                                'popover'
-                                                            ]?.z || '0'
-                                                        }
-                                                        onChange={(e) =>
-                                                            handleOrientationInput(
-                                                                'z',
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                    />
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                )}
-                            </div>
-
-                            {/* 底部按鈕 */}
-                            <div className="action-buttons">
-                                <button
-                                    onClick={handleApplyPopover}
-                                    className="add-device-btn"
-                                    disabled={!popoverDevice.name}
-                                >
-                                    套用
-                                </button>
-                                <button
-                                    onClick={handleClosePopover}
-                                    className="add-device-btn"
-                                >
-                                    取消
-                                </button>
-                            </div>
-                        </div>
+                        <DevicePopover
+                            show={showPopover}
+                            position={popoverPosition}
+                            device={popoverDevice}
+                            isEditing={isEditing}
+                            onChange={handlePopoverInputChange}
+                            onRoleChange={handlePopoverRoleChange}
+                            onApply={handleApplyPopover}
+                            onDelete={handleDeleteDevice}
+                            onClose={handleClosePopover}
+                            onOrientationInput={handleOrientationInput}
+                            orientationInputs={orientationInputs}
+                        />
                     )}
                 </div>
             </div>
