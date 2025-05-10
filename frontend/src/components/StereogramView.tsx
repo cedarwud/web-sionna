@@ -12,6 +12,7 @@ interface SceneViewProps {
     manualDirection?: any
     onManualControl?: (direction: any) => void
     onUAVPositionUpdate?: (position: [number, number, number]) => void
+    uavAnimation: boolean
 }
 
 export default function SceneView({
@@ -20,6 +21,7 @@ export default function SceneView({
     manualDirection,
     onManualControl,
     onUAVPositionUpdate,
+    uavAnimation,
 }: SceneViewProps) {
     return (
         <div
@@ -69,6 +71,7 @@ export default function SceneView({
                         manualDirection={manualDirection}
                         manualControl={onManualControl}
                         onUAVPositionUpdate={onUAVPositionUpdate}
+                        uavAnimation={uavAnimation}
                     />
                     <ContactShadows
                         position={[0, 0.1, 0]}

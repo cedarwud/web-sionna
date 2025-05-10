@@ -31,6 +31,8 @@ interface SidebarProps {
             | null
     ) => void
     activeComponent: string
+    uavAnimation: boolean
+    onUavAnimationChange: (val: boolean) => void
 }
 
 // 星空星點動畫元件
@@ -125,6 +127,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     onAutoChange,
     onManualControl,
     activeComponent,
+    uavAnimation,
+    onUavAnimationChange,
 }) => {
     // 為每個設備的方向值創建本地狀態
     const [orientationInputs, setOrientationInputs] = useState<{
@@ -437,9 +441,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                         >
                             {auto ? '自動飛行：開啟' : '自動飛行：關閉'}
                         </button>
-                        <span style={{ fontSize: 14, color: '#888' }}>
-                            UAV {auto ? '會自動飛行' : '暫停自動飛行'}
-                        </span>
+                        <button
+                            onClick={() => onUavAnimationChange(!uavAnimation)}
+                            style={{ marginLeft: 12 }}
+                        >
+                            {uavAnimation ? '動畫：開啟' : '動畫：關閉'}
+                        </button>
                     </div>
                     {!auto && (
                         <div

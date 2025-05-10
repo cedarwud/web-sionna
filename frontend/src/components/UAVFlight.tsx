@@ -27,6 +27,7 @@ export interface UAVFlightProps {
     manualDirection?: UAVManualDirection
     onManualMoveDone?: () => void
     onPositionUpdate?: (position: [number, number, number]) => void
+    uavAnimation: boolean
 }
 
 export default function UAVFlight({
@@ -36,6 +37,7 @@ export default function UAVFlight({
     manualDirection,
     onManualMoveDone,
     onPositionUpdate,
+    uavAnimation,
 }: UAVFlightProps) {
     const group = useRef<THREE.Group>(null)
     const lightRef = useRef<THREE.PointLight>(null)
@@ -253,6 +255,7 @@ export default function UAVFlight({
         if (action) {
             action.setLoop(THREE.LoopRepeat, Infinity)
             action.play()
+            action.paused = !uavAnimation
         }
         generatePath()
         if (scene) {
@@ -263,13 +266,14 @@ export default function UAVFlight({
                 }
             })
         }
-    }, [actions, scene])
+    }, [actions, scene, uavAnimation])
     useFrame((state: any, delta: number) => {
         if (group.current) {
             group.current.position.copy(currentPosition)
         }
         if (lightRef.current) {
             lightRef.current.position.set(0, 5, 0)
+            lightRef.current.intensity = 2000
         }
         if (!auto) return
         if (!group.current || !lightRef.current || waypoints.length === 0)

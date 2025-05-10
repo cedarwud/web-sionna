@@ -19,6 +19,7 @@ export interface MainSceneProps {
     manualControl?: (direction: UAVManualDirection) => void
     manualDirection?: UAVManualDirection
     onUAVPositionUpdate?: (position: [number, number, number]) => void
+    uavAnimation: boolean
 }
 
 const MainScene: React.FC<MainSceneProps> = ({
@@ -27,6 +28,7 @@ const MainScene: React.FC<MainSceneProps> = ({
     manualDirection,
     manualControl,
     onUAVPositionUpdate,
+    uavAnimation,
 }) => {
     const { scene: mainScene } = useGLTF(SCENE_URL) as any
     const { controls } = useThree()
@@ -101,6 +103,7 @@ const MainScene: React.FC<MainSceneProps> = ({
                             manualControl && manualControl(null)
                         }
                         onPositionUpdate={onUAVPositionUpdate}
+                        uavAnimation={uavAnimation}
                     />
                 )
             } else if (device.role === 'desired') {
@@ -135,7 +138,14 @@ const MainScene: React.FC<MainSceneProps> = ({
                 return null
             }
         })
-    }, [devices, auto, manualDirection, onUAVPositionUpdate, manualControl])
+    }, [
+        devices,
+        auto,
+        manualDirection,
+        onUAVPositionUpdate,
+        manualControl,
+        uavAnimation,
+    ])
 
     return (
         <>

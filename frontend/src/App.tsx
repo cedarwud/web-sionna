@@ -73,7 +73,7 @@ function App() {
         'disconnected' | 'connected' | 'error'
     >('disconnected')
     const [hasTempDevices, setHasTempDevices] = useState<boolean>(false)
-    const [activeComponent, setActiveComponent] = useState<string>('2DRT')
+    const [activeComponent, setActiveComponent] = useState<string>('3DRT')
     const [auto, setAuto] = useState(false)
     const [manualDirection, setManualDirection] = useState<
         | 'up'
@@ -93,6 +93,7 @@ function App() {
     const [uavPosition, setUavPosition] = useState<
         [number, number, number] | null
     >(null)
+    const [uavAnimation, setUavAnimation] = useState(true)
 
     // 從API獲取設備數據
     const fetchDevices = useCallback(async () => {
@@ -628,6 +629,7 @@ function App() {
                         manualDirection={manualDirection}
                         onManualControl={handleManualControl}
                         onUAVPositionUpdate={handleUAVPositionUpdate}
+                        uavAnimation={uavAnimation}
                     />
                 )
             default:
@@ -684,6 +686,8 @@ function App() {
                             onAutoChange={setAuto}
                             onManualControl={handleManualControl}
                             activeComponent={activeComponent}
+                            uavAnimation={uavAnimation}
+                            onUavAnimationChange={setUavAnimation}
                         />
                     }
                     content={renderActiveComponent()}

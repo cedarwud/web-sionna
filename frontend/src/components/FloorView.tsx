@@ -970,10 +970,19 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
         const handleNodeClick = useCallback(
             async (deviceId: number, e: React.MouseEvent) => {
                 e.stopPropagation() // 防止冒泡到圖像的點擊處理
+
                 try {
-                    const backendDevice = await getDeviceById(deviceId)
+                    // const backendDevice = await getDeviceById(deviceId)
                     const device = propDevices.find((d) => d.id === deviceId)
-                    if (!device) return // 防止錯誤
+                    if (!device) {
+                        // 新增日誌，檢查是否因為找不到裝置而提前返回
+                        console.warn(
+                            `[SceneViewer] Device not found in propDevices. ID: ${deviceId}`,
+                            'Current propDevices:',
+                            propDevices
+                        )
+                        return // 防止錯誤
+                    }
 
                     const { position_x, position_y } = device
 
@@ -985,17 +994,20 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                     // 更新編輯相關狀態
                     setIsEditing(true)
                     setEditingDeviceId(deviceId)
-                    setPopoverPosition({
+
+                    const newPopoverPosition = {
                         x: position_x,
                         y: position_y,
                         clientX,
                         clientY,
                         sceneX: position_x,
                         sceneY: position_y,
-                    })
+                    }
+
+                    setPopoverPosition(newPopoverPosition)
 
                     // 更新 popoverDevice 狀態
-                    setPopoverDevice({
+                    const newPopoverDevice = {
                         name: device.name,
                         position_x: device.position_x,
                         position_y: device.position_y,
@@ -1006,11 +1018,19 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                         power_dbm: device.power_dbm || 0,
                         active: device.active,
                         role: device.role,
-                    })
+                    }
 
+                    setPopoverDevice(newPopoverDevice)
                     setShowPopover(true)
                 } catch (error) {
-                    console.error(`獲取設備 ID ${deviceId} 失敗:`, error)
+                    console.error(
+                        `[SceneViewer] Error in handleNodeClick for device ID ${deviceId}:`,
+                        error
+                    )
+                    // 發生錯誤時，確保彈窗是關閉的
+                    setShowPopover(false)
+                    setIsEditing(false)
+                    setEditingDeviceId(null)
                 }
             },
             [propDevices]
