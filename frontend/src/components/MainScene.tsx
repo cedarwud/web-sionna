@@ -117,34 +117,37 @@ const MainScene: React.FC<MainSceneProps> = ({
         return root
     }, [mainScene])
 
-    const deviceMeshes = useMemo(() => {
-        // 過濾出所有接收器設備，以便管理它們的索引
-        const receivers = devices.filter(
-            (device) => device.role === 'receiver' && device.active
-        )
-
-        // 為每個接收器設備創建地圖以便查詢索引
-        const receiverIndices = new Map()
-        receivers.forEach((device, index) => {
-            receiverIndices.set(device.id, index)
+    // 追蹤每個設備已經創建的 UAV 實例
+    const receiverInstanceIds = useMemo(() => {
+        const ids: { [key: number]: string } = {}
+        devices.forEach((device) => {
+            if (device.role === 'receiver') {
+                // 確保每個設備 ID 都有一個唯一的實例 ID
+                if (!ids[device.id]) {
+                    ids[device.id] = `uav-device-${device.id}-${Math.random()
+                        .toString(36)
+                        .substr(2, 5)}`
+                }
+            }
         })
+        console.log('生成 UAV 實例 IDs:', ids)
+        return ids
+    }, [devices])
 
-        console.log(`總共有 ${receivers.length} 台可用的無人機`)
-
+    const deviceMeshes = useMemo(() => {
         return devices.map((device: any) => {
-            if (device.role === 'receiver' && device.active) {
-                // 獲取該接收器在所有接收器中的索引
-                const receiverIndex = receiverIndices.get(device.id) || 0
-
-                // 使用真實高度，不添加人為偏移
+            if (device.role === 'receiver') {
+                // 使用設備 ID 作為唯一實例 ID
+                const instanceId =
+                    receiverInstanceIds[device.id] || `uav-device-${device.id}`
                 console.log(
-                    `渲染無人機 ID=${device.id}, 真實位置=[${device.position_x}, ${device.position_z}, ${device.position_y}]`
+                    `渲染 UAV 設備 ID: ${device.id}, 實例 ID: ${instanceId}, 位置: [${device.position_x}, ${device.position_z}, ${device.position_y}]`
                 )
 
                 return (
                     <UAVFlight
-                        key={`uav-${device.id}`}
-                        instanceId={device.id}
+                        key={device.id}
+                        instanceId={instanceId}
                         position={[
                             device.position_x,
                             device.position_z,
@@ -160,10 +163,10 @@ const MainScene: React.FC<MainSceneProps> = ({
                         uavAnimation={uavAnimation}
                     />
                 )
-            } else if (device.role === 'desired' && device.active) {
+            } else if (device.role === 'desired') {
                 return (
                     <StaticModel
-                        key={`bs-${device.id}`}
+                        key={device.id}
                         url={BS_MODEL_URL}
                         position={[
                             device.position_x,
@@ -174,10 +177,10 @@ const MainScene: React.FC<MainSceneProps> = ({
                         pivotOffset={[0, -900, 0]}
                     />
                 )
-            } else if (device.role === 'jammer' && device.active) {
+            } else if (device.role === 'jammer') {
                 return (
                     <StaticModel
-                        key={`jam-${device.id}`}
+                        key={device.id}
                         url={JAMMER_MODEL_URL}
                         position={[
                             device.position_x,
@@ -199,6 +202,7 @@ const MainScene: React.FC<MainSceneProps> = ({
         onUAVPositionUpdate,
         manualControl,
         uavAnimation,
+        receiverInstanceIds,
     ])
 
     return (

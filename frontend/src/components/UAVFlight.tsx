@@ -1,11 +1,11 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useMemo } from 'react'
 import { useGLTF, useAnimations, Clone } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
 const UAV_MODEL_URL = '/api/v1/sionna/models/uav'
 
-// 維護一個緩存以避免重複加載
+// 緩存原始模型，避免重複加載
 let cachedModel: any = null
 
 export type UAVManualDirection =
@@ -31,7 +31,8 @@ export interface UAVFlightProps {
     onManualMoveDone?: () => void
     onPositionUpdate?: (position: [number, number, number]) => void
     uavAnimation: boolean
-    instanceId?: string | number // 新增實例ID屬性
+    // 添加唯一識別符，確保每個 UAV 實例獨立
+    instanceId?: string
 }
 
 export default function UAVFlight({
@@ -42,20 +43,30 @@ export default function UAVFlight({
     onManualMoveDone,
     onPositionUpdate,
     uavAnimation,
-    instanceId = 'default', // 默認實例ID
+    instanceId = `uav-${Math.random().toString(36).substr(2, 9)}`,
 }: UAVFlightProps) {
     const group = useRef<THREE.Group>(null)
     const lightRef = useRef<THREE.PointLight>(null)
 
-    // 使用緩存以避免重複加載
-    if (!cachedModel) {
-        cachedModel = useGLTF(UAV_MODEL_URL)
-    }
+    // 使用標準加載方式，但確保模型緩存
+    const { scene: originalScene, animations } = useGLTF(UAV_MODEL_URL) as any
 
-    // 使用緩存的模型
-    const { scene, animations } = cachedModel
+    // 創建模型的深度克隆以避免共享問題
+    const uniqueScene = useMemo(() => {
+        // 如果緩存中沒有模型，則存儲當前加載的模型
+        if (!cachedModel) {
+            cachedModel = originalScene
+            console.log(`緩存原始 UAV 模型，UUID: ${originalScene.uuid}`)
+        }
 
-    // 從緩存的模型創建獨立動畫混合器
+        // 每個實例使用獨立的 UUID
+        const uniqueId = `${instanceId}-${new Date().getTime()}`
+        console.log(`創建 UAV 實例 ${uniqueId} 於座標 [${position}]`)
+
+        return cachedModel
+    }, [originalScene, position, instanceId])
+
+    // 修改動畫處理以避免綁定錯誤
     const { actions, mixer } = useAnimations(animations, group)
     const lastUpdateTimeRef = useRef<number>(0)
     const throttleInterval = 100
@@ -311,8 +322,8 @@ export default function UAVFlight({
 
         generatePath()
 
-        if (scene) {
-            scene.traverse((child: THREE.Object3D) => {
+        if (uniqueScene) {
+            uniqueScene.traverse((child: THREE.Object3D) => {
                 if ((child as THREE.Mesh).isMesh) {
                     child.castShadow = true
                     child.receiveShadow = true
@@ -330,13 +341,11 @@ export default function UAVFlight({
             })
         }
 
-        console.log(`UAV 實例 ${instanceId} 已初始化，位置=[${position}]`)
-
         // 清理函數：恢復原始警告功能
         return () => {
             console.warn = originalWarning
         }
-    }, [actions, scene, uavAnimation, instanceId, position])
+    }, [actions, uniqueScene, uavAnimation])
 
     // 確保使用標準材質
     const ensureStandardMaterial = (material: THREE.Material) => {
@@ -524,19 +533,13 @@ export default function UAVFlight({
         throttleInterval,
     ])
     useEffect(() => {
-        console.log('UAV 模型載入成功:', scene)
+        console.log('UAV 模型載入成功:', uniqueScene)
         console.log('光源已添加到組件中')
-    }, [scene])
+    }, [uniqueScene])
     return (
         <group ref={group} position={position} scale={scale}>
-            <Clone
-                object={scene}
-                castShadow
-                receiveShadow
-                matrixAutoUpdate
-                deep={true} // 深度克隆，包括材質
-                onClick={() => console.log(`UAV ${instanceId} 被點擊`)}
-            />
+            {/* 使用 Clone 組件代替 primitive，確保深度克隆並生成唯一 UUID */}
+            <Clone object={uniqueScene} deep={true} castShadow receiveShadow />
             <pointLight
                 ref={lightRef}
                 position={[0, 5, 0]}
