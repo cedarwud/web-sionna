@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { useGLTF, useAnimations, Clone } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
@@ -31,7 +31,7 @@ export interface UAVFlightProps {
     onManualMoveDone?: () => void
     onPositionUpdate?: (position: [number, number, number]) => void
     uavAnimation: boolean
-    instanceId?: string | number
+    instanceId?: string | number // 新增實例ID屬性
 }
 
 export default function UAVFlight({
@@ -42,7 +42,7 @@ export default function UAVFlight({
     onManualMoveDone,
     onPositionUpdate,
     uavAnimation,
-    instanceId = 'main',
+    instanceId = 'default', // 默認實例ID
 }: UAVFlightProps) {
     const group = useRef<THREE.Group>(null)
     const lightRef = useRef<THREE.PointLight>(null)
@@ -55,8 +55,8 @@ export default function UAVFlight({
     // 使用緩存的模型
     const { scene, animations } = cachedModel
 
-    // 修改動畫處理以避免綁定錯誤
-    const { actions } = useAnimations(animations, group)
+    // 從緩存的模型創建獨立動畫混合器
+    const { actions, mixer } = useAnimations(animations, group)
     const lastUpdateTimeRef = useRef<number>(0)
     const throttleInterval = 100
 
@@ -265,7 +265,32 @@ export default function UAVFlight({
         return newWaypoints
     }
     useEffect(() => {
-        console.log(`UAV ${instanceId} 掛載，位置:`, position)
+        // 設置警告攔截器以忽略動畫綁定錯誤
+        const originalWarning = console.warn
+        console.warn = function (...args: any[]) {
+            const message = args[0]
+            if (
+                message &&
+                typeof message === 'string' &&
+                message.includes(
+                    'THREE.PropertyBinding: No target node found for track:'
+                )
+            ) {
+                // 忽略找不到節點的警告
+                return
+            }
+            if (
+                message &&
+                typeof message === 'string' &&
+                message.includes(
+                    'Unknown extension "KHR_materials_pbrSpecularGlossiness"'
+                )
+            ) {
+                // 忽略未知擴展警告
+                return
+            }
+            originalWarning.apply(console, args)
+        }
 
         // 安全地播放動畫，忽略錯誤
         try {
@@ -285,7 +310,33 @@ export default function UAVFlight({
         }
 
         generatePath()
-    }, [actions, uavAnimation, position, instanceId])
+
+        if (scene) {
+            scene.traverse((child: THREE.Object3D) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    child.castShadow = true
+                    child.receiveShadow = true
+
+                    // 檢查材質，如果必要，替換為標準材質
+                    const mesh = child as THREE.Mesh
+                    if (Array.isArray(mesh.material)) {
+                        mesh.material = mesh.material.map((mat) =>
+                            ensureStandardMaterial(mat)
+                        )
+                    } else {
+                        mesh.material = ensureStandardMaterial(mesh.material)
+                    }
+                }
+            })
+        }
+
+        console.log(`UAV 實例 ${instanceId} 已初始化，位置=[${position}]`)
+
+        // 清理函數：恢復原始警告功能
+        return () => {
+            console.warn = originalWarning
+        }
+    }, [actions, scene, uavAnimation, instanceId, position])
 
     // 確保使用標準材質
     const ensureStandardMaterial = (material: THREE.Material) => {
@@ -473,44 +524,17 @@ export default function UAVFlight({
         throttleInterval,
     ])
     useEffect(() => {
-        console.log(`UAV ${instanceId} 模型載入成功`)
-    }, [instanceId])
-
-    // 維護獨立的材質實例
-    useEffect(() => {
-        if (scene) {
-            console.log(`處理 UAV ${instanceId} 的材質`)
-            scene.traverse((child: THREE.Object3D) => {
-                if ((child as THREE.Mesh).isMesh) {
-                    const mesh = child as THREE.Mesh
-                    child.castShadow = true
-                    child.receiveShadow = true
-
-                    if (Array.isArray(mesh.material)) {
-                        mesh.material = mesh.material.map((mat) =>
-                            ensureStandardMaterial(mat)
-                        )
-                    } else {
-                        mesh.material = ensureStandardMaterial(mesh.material)
-                    }
-                }
-            })
-        }
-    }, [scene, instanceId])
-
+        console.log('UAV 模型載入成功:', scene)
+        console.log('光源已添加到組件中')
+    }, [scene])
     return (
-        <group
-            ref={group}
-            position={position}
-            scale={scale}
-            name={`uav-instance-${instanceId}`}
-        >
+        <group ref={group} position={position} scale={scale}>
             <Clone
                 object={scene}
                 castShadow
                 receiveShadow
                 matrixAutoUpdate
-                deep={true}
+                deep={true} // 深度克隆，包括材質
                 onClick={() => console.log(`UAV ${instanceId} 被點擊`)}
             />
             <pointLight

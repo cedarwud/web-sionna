@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useMemo, useEffect } from 'react'
+import React, { useLayoutEffect, useMemo } from 'react'
 import { useGLTF } from '@react-three/drei'
 import { useThree } from '@react-three/fiber'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
@@ -38,24 +38,6 @@ const MainScene: React.FC<MainSceneProps> = ({
     // 加載主場景模型，使用 useMemo 避免重複加載
     const { scene: mainScene } = useGLTF(SCENE_URL) as any
     const { controls } = useThree()
-
-    // 記錄有多少接收器設備被渲染
-    useEffect(() => {
-        const receiverDevices = devices.filter(
-            (d) => d.role === 'receiver' && d.active
-        )
-        console.log('接收器設備總數:', receiverDevices.length)
-        if (receiverDevices.length > 0) {
-            console.log(
-                '接收器設備詳情:',
-                receiverDevices.map((d) => ({
-                    id: d.id,
-                    position: [d.position_x, d.position_y, d.position_z],
-                    active: d.active,
-                }))
-            )
-        }
-    }, [devices])
 
     useLayoutEffect(() => {
         ;(controls as OrbitControlsImpl)?.target?.set(0, 0, 0)
@@ -136,11 +118,10 @@ const MainScene: React.FC<MainSceneProps> = ({
     }, [mainScene])
 
     const deviceMeshes = useMemo(() => {
-        // 計算有多少個接收器設備需要渲染
+        // 過濾出所有接收器設備，以便管理它們的索引
         const receivers = devices.filter(
-            (d) => d.role === 'receiver' && d.active
+            (device) => device.role === 'receiver' && device.active
         )
-        console.log(`準備渲染 ${receivers.length} 個無人機...`)
 
         // 為每個接收器設備創建地圖以便查詢索引
         const receiverIndices = new Map()
@@ -148,68 +129,69 @@ const MainScene: React.FC<MainSceneProps> = ({
             receiverIndices.set(device.id, index)
         })
 
-        return devices
-            .map((device: any) => {
-                if (device.role === 'receiver' && device.active) {
-                    // 獲取該接收器在所有接收器中的索引
-                    const receiverIndex = receiverIndices.get(device.id) || 0
+        console.log(`總共有 ${receivers.length} 台可用的無人機`)
 
-                    // 使用真實高度，不添加人為偏移
-                    console.log(
-                        `渲染無人機 ID=${device.id}, 真實位置=[${device.position_x}, ${device.position_z}, ${device.position_y}]`
-                    )
+        return devices.map((device: any) => {
+            if (device.role === 'receiver' && device.active) {
+                // 獲取該接收器在所有接收器中的索引
+                const receiverIndex = receiverIndices.get(device.id) || 0
 
-                    return (
-                        <UAVFlight
-                            key={`uav-${device.id}`}
-                            instanceId={device.id}
-                            position={[
-                                device.position_x,
-                                device.position_z, // 使用真實高度，不添加偏移
-                                device.position_y,
-                            ]}
-                            scale={[UAV_SCALE, UAV_SCALE, UAV_SCALE]}
-                            auto={auto}
-                            manualDirection={manualDirection}
-                            onManualMoveDone={() =>
-                                manualControl && manualControl(null)
-                            }
-                            onPositionUpdate={onUAVPositionUpdate}
-                            uavAnimation={uavAnimation}
-                        />
-                    )
-                } else if (device.role === 'desired' && device.active) {
-                    return (
-                        <StaticModel
-                            key={`tower-${device.id}`}
-                            url={BS_MODEL_URL}
-                            position={[
-                                device.position_x,
-                                device.position_z + 5,
-                                device.position_y,
-                            ]}
-                            scale={[0.05, 0.05, 0.05]}
-                            pivotOffset={[0, -900, 0]}
-                        />
-                    )
-                } else if (device.role === 'jammer' && device.active) {
-                    return (
-                        <StaticModel
-                            key={`jammer-${device.id}`}
-                            url={JAMMER_MODEL_URL}
-                            position={[
-                                device.position_x,
-                                device.position_z + 5,
-                                device.position_y,
-                            ]}
-                            scale={[0.005, 0.005, 0.005]}
-                            pivotOffset={[0, -8970, 0]}
-                        />
-                    )
-                }
+                // 使用真實高度，不添加人為偏移
+                console.log(
+                    `渲染無人機 ID=${device.id}, 真實位置=[${device.position_x}, ${device.position_z}, ${device.position_y}]`
+                )
+
+                return (
+                    <UAVFlight
+                        key={`uav-${device.id}`}
+                        instanceId={device.id}
+                        position={[
+                            device.position_x,
+                            device.position_z,
+                            device.position_y,
+                        ]}
+                        scale={[UAV_SCALE, UAV_SCALE, UAV_SCALE]}
+                        auto={auto}
+                        manualDirection={manualDirection}
+                        onManualMoveDone={() =>
+                            manualControl && manualControl(null)
+                        }
+                        onPositionUpdate={onUAVPositionUpdate}
+                        uavAnimation={uavAnimation}
+                    />
+                )
+            } else if (device.role === 'desired' && device.active) {
+                return (
+                    <StaticModel
+                        key={`bs-${device.id}`}
+                        url={BS_MODEL_URL}
+                        position={[
+                            device.position_x,
+                            device.position_z + 5,
+                            device.position_y,
+                        ]}
+                        scale={[0.05, 0.05, 0.05]}
+                        pivotOffset={[0, -900, 0]}
+                    />
+                )
+            } else if (device.role === 'jammer' && device.active) {
+                return (
+                    <StaticModel
+                        key={`jam-${device.id}`}
+                        url={JAMMER_MODEL_URL}
+                        position={[
+                            device.position_x,
+                            device.position_z + 5,
+                            device.position_y,
+                        ]}
+                        scale={[0.005, 0.005, 0.005]}
+                        pivotOffset={[0, -8970, 0]}
+                    />
+                )
+            } else {
                 return null
-            })
-            .filter(Boolean) // 過濾掉 null 元素
+            }
+        })
     }, [
         devices,
         auto,
