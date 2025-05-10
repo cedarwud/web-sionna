@@ -1,12 +1,11 @@
-import { useRef, useEffect, useState, useMemo } from 'react'
-import { useGLTF, useAnimations, Clone } from '@react-three/drei'
+import { useRef, useEffect, useState, RefObject, useMemo } from 'react'
+import { useGLTF, Clone } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
+// @ts-ignore
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
 
 const UAV_MODEL_URL = '/api/v1/sionna/models/uav'
-
-// 緩存原始模型，避免重複加載
-let cachedModel: any = null
 
 export type UAVManualDirection =
     | 'up'
@@ -31,8 +30,6 @@ export interface UAVFlightProps {
     onManualMoveDone?: () => void
     onPositionUpdate?: (position: [number, number, number]) => void
     uavAnimation: boolean
-    // 添加唯一識別符，確保每個 UAV 實例獨立
-    instanceId?: string
 }
 
 export default function UAVFlight({
@@ -43,31 +40,22 @@ export default function UAVFlight({
     onManualMoveDone,
     onPositionUpdate,
     uavAnimation,
-    instanceId = `uav-${Math.random().toString(36).substr(2, 9)}`,
 }: UAVFlightProps) {
     const group = useRef<THREE.Group>(null)
+    const cloneRef = useRef<THREE.Object3D>(null)
     const lightRef = useRef<THREE.PointLight>(null)
 
-    // 使用標準加載方式，但確保模型緩存
-    const { scene: originalScene, animations } = useGLTF(UAV_MODEL_URL) as any
+    // 使用標準加載方式
+    const { scene, animations } = useGLTF(UAV_MODEL_URL) as any
 
-    // 創建模型的深度克隆以避免共享問題
-    const uniqueScene = useMemo(() => {
-        // 如果緩存中沒有模型，則存儲當前加載的模型
-        if (!cachedModel) {
-            cachedModel = originalScene
-            console.log(`緩存原始 UAV 模型，UUID: ${originalScene.uuid}`)
-        }
+    // 用 useMemo 確保每個 UAV 都有獨立骨架
+    const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene])
 
-        // 每個實例使用獨立的 UUID
-        const uniqueId = `${instanceId}-${new Date().getTime()}`
-        console.log(`創建 UAV 實例 ${uniqueId} 於座標 [${position}]`)
+    const [mixer, setMixer] = useState<THREE.AnimationMixer | null>(null)
+    const [actions, setActions] = useState<{
+        [key: string]: THREE.AnimationAction
+    }>({})
 
-        return cachedModel
-    }, [originalScene, position, instanceId])
-
-    // 修改動畫處理以避免綁定錯誤
-    const { actions, mixer } = useAnimations(animations, group)
     const lastUpdateTimeRef = useRef<number>(0)
     const throttleInterval = 100
 
@@ -322,8 +310,8 @@ export default function UAVFlight({
 
         generatePath()
 
-        if (uniqueScene) {
-            uniqueScene.traverse((child: THREE.Object3D) => {
+        if (clonedScene) {
+            clonedScene.traverse((child: THREE.Object3D) => {
                 if ((child as THREE.Mesh).isMesh) {
                     child.castShadow = true
                     child.receiveShadow = true
@@ -345,7 +333,7 @@ export default function UAVFlight({
         return () => {
             console.warn = originalWarning
         }
-    }, [actions, uniqueScene, uavAnimation])
+    }, [actions, clonedScene, uavAnimation])
 
     // 確保使用標準材質
     const ensureStandardMaterial = (material: THREE.Material) => {
@@ -371,7 +359,96 @@ export default function UAVFlight({
         return material
     }
 
-    useFrame((state: any, delta: number) => {
+    // 尋找動畫 root（骨架/SkinnedMesh/Armature）
+    function findAnimationRoot(obj: THREE.Object3D): THREE.Object3D {
+        let found: THREE.Object3D | null = null
+        obj.traverse((child) => {
+            if (
+                child.type === 'Bone' ||
+                child.type === 'SkinnedMesh' ||
+                child.name.toLowerCase().includes('armature')
+            ) {
+                if (!found) found = child
+            }
+        })
+        return found || obj
+    }
+
+    useEffect(() => {
+        if (clonedScene && animations && animations.length > 0) {
+            // 診斷 log
+            console.log('=== AnimationClip tracks ===')
+            animations.forEach((clip: THREE.AnimationClip) => {
+                console.log(
+                    'clip:',
+                    clip.name,
+                    clip.tracks.map((t) => t.name)
+                )
+            })
+            console.log('=== clonedScene children ===')
+            clonedScene.traverse((obj: THREE.Object3D) => {
+                console.log('obj:', obj.name, obj.type)
+            })
+
+            // 自動尋找動畫 root
+            const animationRoot = findAnimationRoot(clonedScene)
+            console.log(
+                'AnimationMixer root:',
+                animationRoot.name,
+                animationRoot.type
+            )
+            const newMixer = new THREE.AnimationMixer(animationRoot)
+            const newActions: { [key: string]: THREE.AnimationAction } = {}
+            animations.forEach((clip: THREE.AnimationClip) => {
+                newActions[clip.name] = newMixer.clipAction(clip)
+            })
+            setMixer(newMixer)
+            setActions(newActions)
+        }
+    }, [clonedScene, animations])
+
+    // 控制動畫播放/暫停
+    useEffect(() => {
+        if (mixer && animations && animations.length > 0) {
+            // 只建立 hover 動畫
+            const hoverClip = animations.find(
+                (clip: THREE.AnimationClip) => clip.name === 'hover'
+            )
+            let hoverAction: THREE.AnimationAction | null = null
+            if (hoverClip) {
+                hoverAction = mixer.clipAction(hoverClip)
+                hoverAction.reset()
+                hoverAction.setLoop(THREE.LoopRepeat, Infinity)
+                if (uavAnimation) {
+                    hoverAction.enabled = true
+                    hoverAction.play()
+                    hoverAction.paused = false
+                    hoverAction.setEffectiveWeight(1)
+                } else {
+                    hoverAction.stop()
+                    hoverAction.paused = true
+                    hoverAction.enabled = false
+                    hoverAction.reset()
+                }
+            }
+            // 停用所有非 hover 動畫
+            animations.forEach((clip: THREE.AnimationClip) => {
+                if (clip.name !== 'hover') {
+                    const action = mixer.existingAction(clip)
+                    if (action) {
+                        action.stop()
+                        action.enabled = false
+                        action.setEffectiveWeight(0)
+                        action.reset()
+                    }
+                }
+            })
+        }
+    }, [mixer, animations, uavAnimation, clonedScene])
+
+    // 驅動 mixer
+    useFrame((state, delta) => {
+        if (mixer) mixer.update(delta)
         if (group.current) {
             group.current.position.copy(currentPosition)
         }
@@ -533,13 +610,54 @@ export default function UAVFlight({
         throttleInterval,
     ])
     useEffect(() => {
-        console.log('UAV 模型載入成功:', uniqueScene)
+        console.log('UAV 模型載入成功:', clonedScene)
         console.log('光源已添加到組件中')
-    }, [uniqueScene])
+    }, [clonedScene])
+    useEffect(() => {
+        console.log('=== UAVFlight Animation Debug ===')
+        console.log('uavAnimation:', uavAnimation)
+        console.log('actions:', actions)
+        console.log('animations:', animations)
+        console.log('clonedScene:', clonedScene)
+
+        if (actions && Object.keys(actions).length > 0) {
+            Object.values(actions).forEach((action) => {
+                if (!action) return
+                action.reset()
+                action.setLoop(THREE.LoopRepeat, Infinity)
+                if (uavAnimation) {
+                    action.play()
+                    action.paused = false
+                } else {
+                    action.paused = true
+                }
+            })
+        }
+    }, [actions, uavAnimation, clonedScene])
     return (
         <group ref={group} position={position} scale={scale}>
-            {/* 使用 Clone 組件代替 primitive，確保深度克隆並生成唯一 UUID */}
-            <Clone object={uniqueScene} deep={true} castShadow receiveShadow />
+            <primitive
+                object={clonedScene}
+                onUpdate={(self: THREE.Object3D) => {
+                    // 只做材質處理，不要 setState
+                    self.traverse((child: THREE.Object3D) => {
+                        if ((child as THREE.Mesh).isMesh) {
+                            const mesh = child as THREE.Mesh
+                            if (Array.isArray(mesh.material)) {
+                                mesh.material = mesh.material.map((mat) =>
+                                    ensureStandardMaterial(mat)
+                                )
+                            } else {
+                                mesh.material = ensureStandardMaterial(
+                                    mesh.material
+                                )
+                            }
+                            mesh.castShadow = true
+                            mesh.receiveShadow = true
+                        }
+                    })
+                }}
+            />
             <pointLight
                 ref={lightRef}
                 position={[0, 5, 0]}

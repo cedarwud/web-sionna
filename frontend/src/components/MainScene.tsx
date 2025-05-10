@@ -117,37 +117,12 @@ const MainScene: React.FC<MainSceneProps> = ({
         return root
     }, [mainScene])
 
-    // 追蹤每個設備已經創建的 UAV 實例
-    const receiverInstanceIds = useMemo(() => {
-        const ids: { [key: number]: string } = {}
-        devices.forEach((device) => {
-            if (device.role === 'receiver') {
-                // 確保每個設備 ID 都有一個唯一的實例 ID
-                if (!ids[device.id]) {
-                    ids[device.id] = `uav-device-${device.id}-${Math.random()
-                        .toString(36)
-                        .substr(2, 5)}`
-                }
-            }
-        })
-        console.log('生成 UAV 實例 IDs:', ids)
-        return ids
-    }, [devices])
-
     const deviceMeshes = useMemo(() => {
         return devices.map((device: any) => {
             if (device.role === 'receiver') {
-                // 使用設備 ID 作為唯一實例 ID
-                const instanceId =
-                    receiverInstanceIds[device.id] || `uav-device-${device.id}`
-                console.log(
-                    `渲染 UAV 設備 ID: ${device.id}, 實例 ID: ${instanceId}, 位置: [${device.position_x}, ${device.position_z}, ${device.position_y}]`
-                )
-
                 return (
                     <UAVFlight
                         key={device.id}
-                        instanceId={instanceId}
                         position={[
                             device.position_x,
                             device.position_z,
@@ -202,7 +177,6 @@ const MainScene: React.FC<MainSceneProps> = ({
         onUAVPositionUpdate,
         manualControl,
         uavAnimation,
-        receiverInstanceIds,
     ])
 
     return (
