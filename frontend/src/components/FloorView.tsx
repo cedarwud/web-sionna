@@ -118,13 +118,13 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
             name: '',
             position_x: 0,
             position_y: 0,
-            position_z: 5,
+            position_z: 40,
             orientation_x: 0,
             orientation_y: 0,
             orientation_z: 0,
             power_dbm: 0,
             active: true,
-            role: 'desired',
+            role: 'receiver',
         })
         const [isEditing, setIsEditing] = useState<boolean>(false)
         const [editingDeviceId, setEditingDeviceId] = useState<number | null>(
@@ -748,7 +748,7 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
 
                         // 生成名稱並設置初始 popover 數據 using calculated sceneCoords
                         const initialDevice = {
-                            position_z: popoverDevice.position_z,
+                            position_z: 40, // 修改：預設 Z 軸值為 40
                             orientation_x: popoverDevice.orientation_x,
                             orientation_y: popoverDevice.orientation_y,
                             orientation_z: popoverDevice.orientation_z,
@@ -1073,7 +1073,7 @@ const SceneViewer: React.FC<SceneViewerProps> = React.memo(
                     orientation_z: 0,
                     power_dbm: 0,
                     active: true,
-                    role: 'desired',
+                    role: 'receiver',
                 })
 
                 // 重新獲取所有設備

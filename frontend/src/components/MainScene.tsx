@@ -23,8 +23,12 @@ export interface MainSceneProps {
     auto: boolean
     manualControl?: (direction: UAVManualDirection) => void
     manualDirection?: UAVManualDirection
-    onUAVPositionUpdate?: (position: [number, number, number]) => void
+    onUAVPositionUpdate?: (
+        position: [number, number, number],
+        deviceId?: number
+    ) => void
     uavAnimation: boolean
+    selectedReceiverIds?: number[]
 }
 
 const MainScene: React.FC<MainSceneProps> = ({
@@ -34,6 +38,7 @@ const MainScene: React.FC<MainSceneProps> = ({
     manualControl,
     onUAVPositionUpdate,
     uavAnimation,
+    selectedReceiverIds = [],
 }) => {
     // 加載主場景模型，使用 useMemo 避免重複加載
     const { scene: mainScene } = useGLTF(SCENE_URL) as any
@@ -119,23 +124,44 @@ const MainScene: React.FC<MainSceneProps> = ({
 
     const deviceMeshes = useMemo(() => {
         return devices.map((device: any) => {
+            const isSelected =
+                device.role === 'receiver' &&
+                device.id !== null &&
+                selectedReceiverIds.includes(device.id)
+
             if (device.role === 'receiver') {
+                const position: [number, number, number] = [
+                    device.position_x,
+                    device.position_z,
+                    device.position_y,
+                ]
+
+                const shouldControl = isSelected
+
                 return (
                     <UAVFlight
-                        key={device.id}
-                        position={[
-                            device.position_x,
-                            device.position_z,
-                            device.position_y,
-                        ]}
-                        scale={[UAV_SCALE, UAV_SCALE, UAV_SCALE]}
-                        auto={auto}
-                        manualDirection={manualDirection}
-                        onManualMoveDone={() =>
-                            manualControl && manualControl(null)
+                        key={
+                            device.id ||
+                            `temp-${device.position_x}-${device.position_y}-${device.position_z}`
                         }
-                        onPositionUpdate={onUAVPositionUpdate}
-                        uavAnimation={uavAnimation}
+                        position={position}
+                        scale={[UAV_SCALE, UAV_SCALE, UAV_SCALE]}
+                        auto={shouldControl ? auto : false}
+                        manualDirection={shouldControl ? manualDirection : null}
+                        onManualMoveDone={() => {
+                            if (manualControl) {
+                                manualControl(null)
+                            }
+                        }}
+                        onPositionUpdate={(pos) => {
+                            if (onUAVPositionUpdate && shouldControl) {
+                                onUAVPositionUpdate(
+                                    pos,
+                                    device.id !== null ? device.id : undefined
+                                )
+                            }
+                        }}
+                        uavAnimation={shouldControl ? uavAnimation : false}
                     />
                 )
             } else if (device.role === 'desired') {
@@ -177,6 +203,7 @@ const MainScene: React.FC<MainSceneProps> = ({
         onUAVPositionUpdate,
         manualControl,
         uavAnimation,
+        selectedReceiverIds,
     ])
 
     return (

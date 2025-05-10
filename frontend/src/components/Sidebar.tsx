@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Device } from '../App'
 import '../styles/Sidebar.css'
+import { UAVManualDirection } from './UAVFlight' // Assuming UAVFlight exports this
 
 interface SidebarProps {
     devices: Device[]
@@ -13,26 +14,12 @@ interface SidebarProps {
     onCancel: () => void
     hasTempDevices: boolean
     auto: boolean
-    onAutoChange: (auto: boolean) => void
-    onManualControl: (
-        direction:
-            | 'up'
-            | 'down'
-            | 'left'
-            | 'right'
-            | 'ascend'
-            | 'descend'
-            | 'left-up'
-            | 'right-up'
-            | 'left-down'
-            | 'right-down'
-            | 'rotate-left'
-            | 'rotate-right'
-            | null
-    ) => void
+    onAutoChange: (auto: boolean) => void // Parent will use selected IDs
+    onManualControl: (direction: UAVManualDirection) => void // Parent will use selected IDs
     activeComponent: string
     uavAnimation: boolean
-    onUavAnimationChange: (val: boolean) => void
+    onUavAnimationChange: (val: boolean) => void // Parent will use selected IDs
+    onSelectedReceiversChange?: (selectedIds: number[]) => void // New prop
 }
 
 // 星空星點動畫元件
@@ -129,6 +116,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     activeComponent,
     uavAnimation,
     onUavAnimationChange,
+    onSelectedReceiversChange, // 接收從父組件傳來的回調函數
 }) => {
     // 為每個設備的方向值創建本地狀態
     const [orientationInputs, setOrientationInputs] = useState<{
@@ -137,6 +125,57 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     // 新增：持續發送控制指令的 interval id
     const manualIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    // 修改：初始化 selectedReceiverIds 包含所有 receiver ID
+    // 這樣當 Sidebar 首次渲染時，所有 receiver badge 會呈現選中狀態
+    const [selectedReceiverIds, setSelectedReceiverIds] = useState<number[]>(
+        () => {
+            // 獲取設備列表中所有合法的 receiver ID
+            return devices
+                .filter(
+                    (device) => device.role === 'receiver' && device.id !== null
+                )
+                .map((device) => device.id as number)
+        }
+    )
+
+    // 同步 selectedReceiverIds 與父組件
+    useEffect(() => {
+        // 當組件掛載時，通知父組件當前選中的 receiver IDs
+        if (onSelectedReceiversChange) {
+            onSelectedReceiversChange(selectedReceiverIds)
+        }
+    }, []) // 僅在組件掛載時執行一次
+
+    // Effect to synchronize selectedReceiverIds with the current devices list
+    useEffect(() => {
+        const currentReceiverDeviceIds = devices
+            .filter((d) => d.role === 'receiver' && d.id !== null)
+            .map((d) => d.id as number)
+
+        setSelectedReceiverIds((prevSelected) => {
+            // 計算有效的 selectedIds（只包含當前存在的 receiver）
+            const newSelected = prevSelected.filter((id) =>
+                currentReceiverDeviceIds.includes(id)
+            )
+
+            // 如果沒有選中的接收器，則自動選中所有接收器
+            const finalSelected =
+                newSelected.length > 0
+                    ? newSelected
+                    : [...currentReceiverDeviceIds]
+
+            // 如果選擇變更，通知父組件
+            if (
+                JSON.stringify(finalSelected) !== JSON.stringify(prevSelected)
+            ) {
+                if (onSelectedReceiversChange) {
+                    onSelectedReceiversChange(finalSelected)
+                }
+            }
+            return finalSelected
+        })
+    }, [devices, onSelectedReceiversChange])
 
     // 當 devices 更新時，初始化或更新本地輸入狀態
     useEffect(() => {
@@ -157,6 +196,23 @@ const Sidebar: React.FC<SidebarProps> = ({
         })
         setOrientationInputs(newInputs)
     }, [devices])
+
+    // Handler for badge click
+    const handleBadgeClick = (deviceId: number | null) => {
+        if (deviceId === null) return // Should not happen for displayed receiver badges
+
+        setSelectedReceiverIds((prevSelected) => {
+            const newSelected = prevSelected.includes(deviceId)
+                ? prevSelected.filter((id) => id !== deviceId)
+                : [...prevSelected, deviceId]
+
+            // Notify parent component of the change in selection
+            if (onSelectedReceiversChange) {
+                onSelectedReceiversChange(newSelected)
+            }
+            return newSelected
+        })
+    }
 
     // 處理方向輸入的變化
     const handleOrientationInput = (
@@ -292,9 +348,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     }
                                     className="device-type-select"
                                 >
+                                    <option value="receiver">接收器</option>
                                     <option value="desired">發射器</option>
                                     <option value="jammer">干擾源</option>
-                                    <option value="receiver">接收器</option>
                                 </select>
                             </td>
                             <td>
@@ -611,6 +667,60 @@ const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                         </div>
                     )}
+
+                    {/* UAV 名稱徽章區塊 */}
+                    <div
+                        className="uav-name-badges-container"
+                        style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '5px', // 徽章之間的間距
+                            padding: '10px 0', // 容器的上下內邊距
+                            marginTop: '10px', // 與上方元素的間距
+                        }}
+                    >
+                        {devices
+                            .filter(
+                                (device) =>
+                                    device.name &&
+                                    device.role === 'receiver' &&
+                                    device.id !== null // Ensure device has a valid ID
+                            )
+                            .map((device) => {
+                                const isSelected = selectedReceiverIds.includes(
+                                    device.id as number
+                                )
+                                return (
+                                    <span
+                                        key={device.id} // device.id is not null here
+                                        className="uav-name-badge"
+                                        onClick={() =>
+                                            handleBadgeClick(
+                                                device.id as number
+                                            )
+                                        }
+                                        style={{
+                                            backgroundColor: isSelected
+                                                ? 'rgba(50, 50, 75, 0.95)' // 更新：再次調暗選中背景
+                                                : 'rgba(40, 40, 70, 0.8)',
+                                            color: '#e0e0e0',
+                                            padding: '4px 10px',
+                                            borderRadius: '12px',
+                                            fontSize: '0.9em',
+                                            margin: '3px',
+                                            border: isSelected
+                                                ? '2px solid rgba(120, 120, 160, 0.8)' // 更新：再次調暗選中邊框
+                                                : '1px solid rgba(100, 100, 150, 0.5)',
+                                            cursor: 'pointer', // Indicate clickable
+                                            transition:
+                                                'background-color 0.2s ease, border-color 0.2s ease', // Smooth transition
+                                        }}
+                                    >
+                                        {device.name}
+                                    </span>
+                                )
+                            })}
+                    </div>
                 </>
             )}
             <div className="api-status">

@@ -93,7 +93,18 @@ function App() {
     const [uavPosition, setUavPosition] = useState<
         [number, number, number] | null
     >(null)
-    const [uavAnimation, setUavAnimation] = useState(false)
+    const [uavAnimation, setUavAnimation] = useState(true)
+
+    // 新增：追蹤選中的 receiver IDs
+    const [selectedReceiverIds, setSelectedReceiverIds] = useState<number[]>([])
+
+    // 新增狀態來記錄每個 UAV 的初始位置偏移
+    const [uavOffsets, setUavOffsets] = useState<{
+        [key: number]: { x: number; y: number; z: number }
+    }>({})
+
+    // 記錄是否已經初始化了偏移量
+    const [offsetsInitialized, setOffsetsInitialized] = useState(false)
 
     // 從API獲取設備數據
     const fetchDevices = useCallback(async () => {
@@ -110,6 +121,14 @@ function App() {
             setOriginalDevices(frontendDevices)
             setError(null)
             setApiStatus('connected')
+
+            // 預設全選所有 receiver 設備
+            const receiverIds = frontendDevices
+                .filter(
+                    (device) => device.role === 'receiver' && device.id !== null
+                )
+                .map((device) => device.id as number)
+            setSelectedReceiverIds(receiverIds)
         } catch (err: any) {
             console.error('獲取設備失敗:', err)
             const errorMessage = err.message || '未知錯誤'
@@ -402,7 +421,7 @@ function App() {
         const tempId = -Math.floor(Math.random() * 1000000) - 1
 
         // 根據選定的設備類型生成不同的名稱前綴
-        const getPrefix = (role: string = 'desired') => {
+        const getPrefix = (role: string = 'receiver') => {
             switch (role) {
                 case 'desired':
                     return 'tx'
@@ -418,8 +437,8 @@ function App() {
         // 獲取已存在的設備名稱列表，以確保不會重複
         const existingNames = tempDevices.map((device) => device.name)
 
-        // 默認設備類型
-        const defaultRole: string = 'desired'
+        // 修改默認設備類型為 'receiver'
+        const defaultRole: string = 'receiver'
         const prefix = getPrefix(defaultRole)
 
         // 尋找一個可用的名稱（不在現有名稱列表中）
@@ -436,7 +455,7 @@ function App() {
             name: newName,
             position_x: 0,
             position_y: 0,
-            position_z: 0,
+            position_z: 40,
             orientation_x: 0,
             orientation_y: 0,
             orientation_z: 0,
@@ -549,6 +568,12 @@ function App() {
         setActiveComponent(component)
     }
 
+    // 處理 receiver 選擇變更
+    const handleSelectedReceiversChange = (ids: number[]) => {
+        console.log('選中的 receiver IDs:', ids)
+        setSelectedReceiverIds(ids)
+    }
+
     // 處理手動控制 UAV 方向
     const handleManualControl = (
         direction:
@@ -566,58 +591,102 @@ function App() {
             | 'rotate-right'
             | null
     ) => {
+        // 如果沒有選擇任何 receiver，則不進行控制
+        if (selectedReceiverIds.length === 0) {
+            console.log('沒有選中的 receiver，無法控制 UAV')
+            return
+        }
+
         setManualDirection(direction)
     }
 
     // 處理 UAV 位置更新
-    const handleUAVPositionUpdate = (pos: [number, number, number]) => {
+    const handleUAVPositionUpdate = (
+        pos: [number, number, number],
+        deviceId?: number
+    ) => {
+        // 如果沒有指定設備 ID，或者該設備 ID 不在選中的 receivers 中，則不做處理
+        if (deviceId === undefined || !selectedReceiverIds.includes(deviceId)) {
+            return
+        }
+
         setUavPosition(pos)
+
+        // 更新特定設備的座標
+        setTempDevices((prevDevices) => {
+            const updatedDevices = [...prevDevices]
+            const deviceIndex = updatedDevices.findIndex(
+                (d) => d.id === deviceId
+            )
+
+            if (deviceIndex !== -1) {
+                // 座標轉換：Sidebar X = UAV X, Sidebar Y = UAV Z, Sidebar Z = UAV Y
+                const newX = parseFloat(pos[0].toFixed(2))
+                const newY = parseFloat(pos[2].toFixed(2))
+                const newZ = parseFloat(pos[1].toFixed(2))
+
+                // 只有當座標確實變化時才更新
+                if (
+                    updatedDevices[deviceIndex].position_x !== newX ||
+                    updatedDevices[deviceIndex].position_y !== newY ||
+                    updatedDevices[deviceIndex].position_z !== newZ
+                ) {
+                    updatedDevices[deviceIndex] = {
+                        ...updatedDevices[deviceIndex],
+                        position_x: newX,
+                        position_y: newY,
+                        position_z: newZ,
+                    }
+
+                    // 標記為有未保存的變更
+                    setTimeout(() => setHasTempDevices(true), 0)
+                    return updatedDevices
+                }
+            }
+
+            return prevDevices
+        })
     }
 
-    // 當 UAV 位置更新時，同步更新 Sidebar 中的 receiver 設備座標
+    // 當選中的 receiver ID 列表變化時，計算並保存每個 UAV 的相對位置偏移
     useEffect(() => {
-        if (uavPosition) {
-            // 找到第一台 receiver 的 id
-            const firstReceiver = tempDevices.find(
-                (device) => device.role === 'receiver'
-            )
-            if (!firstReceiver) return
-            let needsUpdate = false
-            const updatedDevices = tempDevices.map((device) => {
-                if (
-                    device.role === 'receiver' &&
-                    device.id === firstReceiver.id
-                ) {
-                    // 座標轉換：Sidebar X = UAV X, Sidebar Y = UAV Z, Sidebar Z = UAV Y
-                    const newX = parseFloat(uavPosition[0].toFixed(2))
-                    const newY = parseFloat(uavPosition[2].toFixed(2))
-                    const newZ = parseFloat(uavPosition[1].toFixed(2))
-
-                    // 檢查座標是否有實際變化
-                    if (
-                        device.position_x !== newX ||
-                        device.position_y !== newY ||
-                        device.position_z !== newZ
-                    ) {
-                        needsUpdate = true
-                        return {
-                            ...device,
-                            position_x: newX, // UAV X
-                            position_y: newY, // UAV Z
-                            position_z: newZ, // UAV Y
-                        }
-                    }
-                }
-                return device
-            })
-
-            // 只有在座標實際變化時才更新狀態
-            if (needsUpdate) {
-                setTempDevices(updatedDevices)
-                setHasTempDevices(true)
-            }
+        if (selectedReceiverIds.length <= 1) {
+            // 如果只有一個或沒有選中的 receiver，不需要計算偏移
+            setUavOffsets({})
+            setOffsetsInitialized(false)
+            return
         }
-    }, [uavPosition, tempDevices])
+
+        // 找出選中的 receiver 設備
+        const selectedReceivers = tempDevices.filter(
+            (device) =>
+                device.role === 'receiver' &&
+                device.id !== null &&
+                selectedReceiverIds.includes(device.id)
+        )
+
+        if (selectedReceivers.length <= 1) return
+
+        // 以第一個選中的 receiver 為參考點
+        const referenceDevice = selectedReceivers[0]
+        const newOffsets: {
+            [key: number]: { x: number; y: number; z: number }
+        } = {}
+
+        // 計算其他 receiver 相對於參考點的位置偏移
+        selectedReceivers.forEach((device) => {
+            if (device.id === null) return
+
+            newOffsets[device.id] = {
+                x: device.position_x - referenceDevice.position_x,
+                y: device.position_y - referenceDevice.position_y,
+                z: device.position_z - referenceDevice.position_z,
+            }
+        })
+
+        setUavOffsets(newOffsets)
+        setOffsetsInitialized(true)
+    }, [selectedReceiverIds, tempDevices])
 
     // 渲染當前選中的組件
     const renderActiveComponent = () => {
@@ -638,6 +707,7 @@ function App() {
                         onManualControl={handleManualControl}
                         onUAVPositionUpdate={handleUAVPositionUpdate}
                         uavAnimation={uavAnimation}
+                        selectedReceiverIds={selectedReceiverIds}
                     />
                 )
             default:
@@ -696,6 +766,9 @@ function App() {
                             activeComponent={activeComponent}
                             uavAnimation={uavAnimation}
                             onUavAnimationChange={setUavAnimation}
+                            onSelectedReceiversChange={
+                                handleSelectedReceiversChange
+                            }
                         />
                     }
                     content={renderActiveComponent()}

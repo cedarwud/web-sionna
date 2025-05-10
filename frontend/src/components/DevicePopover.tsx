@@ -89,9 +89,9 @@ const DevicePopover: React.FC<DevicePopoverProps> = ({
                                     }
                                     className="device-type-select"
                                 >
+                                    <option value="receiver">接收器</option>
                                     <option value="desired">發射器</option>
                                     <option value="jammer">干擾源</option>
-                                    <option value="receiver">接收器</option>
                                 </select>
                             </td>
                             <td>
