@@ -1,9 +1,12 @@
-import { useRef, useEffect, useState } from 'react'
-import { useGLTF, useAnimations } from '@react-three/drei'
+import { useRef, useEffect, useState, useMemo } from 'react'
+import { useGLTF, useAnimations, Clone } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
 const UAV_MODEL_URL = '/api/v1/sionna/models/uav'
+
+// 維護一個緩存以避免重複加載
+let cachedModel: any = null
 
 export type UAVManualDirection =
     | 'up'
@@ -28,6 +31,7 @@ export interface UAVFlightProps {
     onManualMoveDone?: () => void
     onPositionUpdate?: (position: [number, number, number]) => void
     uavAnimation: boolean
+    instanceId?: string | number
 }
 
 export default function UAVFlight({
@@ -38,10 +42,20 @@ export default function UAVFlight({
     onManualMoveDone,
     onPositionUpdate,
     uavAnimation,
+    instanceId = 'main',
 }: UAVFlightProps) {
     const group = useRef<THREE.Group>(null)
     const lightRef = useRef<THREE.PointLight>(null)
-    const { scene, animations } = useGLTF(UAV_MODEL_URL) as any
+
+    // 使用緩存以避免重複加載
+    if (!cachedModel) {
+        cachedModel = useGLTF(UAV_MODEL_URL)
+    }
+
+    // 使用緩存的模型
+    const { scene, animations } = cachedModel
+
+    // 修改動畫處理以避免綁定錯誤
     const { actions } = useAnimations(animations, group)
     const lastUpdateTimeRef = useRef<number>(0)
     const throttleInterval = 100
@@ -251,22 +265,52 @@ export default function UAVFlight({
         return newWaypoints
     }
     useEffect(() => {
-        const action = actions[Object.keys(actions)[0]]
-        if (action) {
-            action.setLoop(THREE.LoopRepeat, Infinity)
-            action.play()
-            action.paused = !uavAnimation
-        }
-        generatePath()
-        if (scene) {
-            scene.traverse((child: THREE.Object3D) => {
-                if ((child as THREE.Mesh).isMesh) {
-                    child.castShadow = true
-                    child.receiveShadow = true
+        console.log(`UAV ${instanceId} 掛載，位置:`, position)
+
+        // 安全地播放動畫，忽略錯誤
+        try {
+            // 檢查是否有可用的動畫
+            if (actions && Object.keys(actions).length > 0) {
+                const action = actions[Object.keys(actions)[0]]
+                if (action) {
+                    action.setLoop(THREE.LoopRepeat, Infinity)
+                    action.play()
+                    action.paused = !uavAnimation
                 }
-            })
+            } else {
+                console.log('沒有可用的動畫')
+            }
+        } catch (error) {
+            console.error('動畫播放錯誤:', error)
         }
-    }, [actions, scene, uavAnimation])
+
+        generatePath()
+    }, [actions, uavAnimation, position, instanceId])
+
+    // 確保使用標準材質
+    const ensureStandardMaterial = (material: THREE.Material) => {
+        if (
+            !(material instanceof THREE.MeshStandardMaterial) &&
+            !(material instanceof THREE.MeshPhysicalMaterial)
+        ) {
+            const stdMaterial = new THREE.MeshStandardMaterial()
+
+            // 複製基本屬性
+            if (
+                'color' in material &&
+                (material as any).color instanceof THREE.Color
+            ) {
+                stdMaterial.color.copy((material as any).color)
+            }
+            if ('map' in material) {
+                stdMaterial.map = (material as any).map
+            }
+
+            return stdMaterial
+        }
+        return material
+    }
+
     useFrame((state: any, delta: number) => {
         if (group.current) {
             group.current.position.copy(currentPosition)
@@ -429,32 +473,45 @@ export default function UAVFlight({
         throttleInterval,
     ])
     useEffect(() => {
-        console.log('UAV 模型載入成功:', scene)
-        console.log('光源已添加到組件中')
-    }, [scene])
-    return (
-        <group ref={group} position={position} scale={scale}>
-            <primitive
-                object={scene}
-                onUpdate={(self: THREE.Object3D) =>
-                    self.traverse((child: THREE.Object3D) => {
-                        if ((child as THREE.Mesh).isMesh) {
-                            const mesh = child as THREE.Mesh
-                            if (
-                                mesh.material instanceof THREE.MeshBasicMaterial
-                            ) {
-                                console.warn(
-                                    'UAV 模型使用 MeshBasicMaterial，不支援光照'
-                                )
-                                mesh.material = new THREE.MeshStandardMaterial({
-                                    color: 0xffffff,
-                                })
-                            }
-                            mesh.castShadow = true
-                            mesh.receiveShadow = true
-                        }
-                    })
+        console.log(`UAV ${instanceId} 模型載入成功`)
+    }, [instanceId])
+
+    // 維護獨立的材質實例
+    useEffect(() => {
+        if (scene) {
+            console.log(`處理 UAV ${instanceId} 的材質`)
+            scene.traverse((child: THREE.Object3D) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    const mesh = child as THREE.Mesh
+                    child.castShadow = true
+                    child.receiveShadow = true
+
+                    if (Array.isArray(mesh.material)) {
+                        mesh.material = mesh.material.map((mat) =>
+                            ensureStandardMaterial(mat)
+                        )
+                    } else {
+                        mesh.material = ensureStandardMaterial(mesh.material)
+                    }
                 }
+            })
+        }
+    }, [scene, instanceId])
+
+    return (
+        <group
+            ref={group}
+            position={position}
+            scale={scale}
+            name={`uav-instance-${instanceId}`}
+        >
+            <Clone
+                object={scene}
+                castShadow
+                receiveShadow
+                matrixAutoUpdate
+                deep={true}
+                onClick={() => console.log(`UAV ${instanceId} 被點擊`)}
             />
             <pointLight
                 ref={lightRef}

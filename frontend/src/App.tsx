@@ -93,7 +93,7 @@ function App() {
     const [uavPosition, setUavPosition] = useState<
         [number, number, number] | null
     >(null)
-    const [uavAnimation, setUavAnimation] = useState(true)
+    const [uavAnimation, setUavAnimation] = useState(false)
 
     // 從API獲取設備數據
     const fetchDevices = useCallback(async () => {
@@ -577,9 +577,17 @@ function App() {
     // 當 UAV 位置更新時，同步更新 Sidebar 中的 receiver 設備座標
     useEffect(() => {
         if (uavPosition) {
+            // 找到第一台 receiver 的 id
+            const firstReceiver = tempDevices.find(
+                (device) => device.role === 'receiver'
+            )
+            if (!firstReceiver) return
             let needsUpdate = false
             const updatedDevices = tempDevices.map((device) => {
-                if (device.role === 'receiver') {
+                if (
+                    device.role === 'receiver' &&
+                    device.id === firstReceiver.id
+                ) {
                     // 座標轉換：Sidebar X = UAV X, Sidebar Y = UAV Z, Sidebar Z = UAV Y
                     const newX = parseFloat(uavPosition[0].toFixed(2))
                     const newY = parseFloat(uavPosition[2].toFixed(2))
