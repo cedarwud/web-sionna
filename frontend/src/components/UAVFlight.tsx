@@ -7,6 +7,9 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
 
 const UAV_MODEL_URL = '/api/v1/sionna/models/uav'
 
+// 請調整此值以補償懸停動畫的 Y 軸位移
+const HOVER_ANIMATION_Y_OFFSET = -1.28 // 範例值，如果向上跳了 5 個單位，則設為 -5
+
 export type UAVManualDirection =
     | 'up'
     | 'down'
@@ -292,21 +295,21 @@ export default function UAVFlight({
         }
 
         // 安全地播放動畫，忽略錯誤
-        try {
-            // 檢查是否有可用的動畫
-            if (actions && Object.keys(actions).length > 0) {
-                const action = actions[Object.keys(actions)[0]]
-                if (action) {
-                    action.setLoop(THREE.LoopRepeat, Infinity)
-                    action.play()
-                    action.paused = !uavAnimation
-                }
-            } else {
-                console.log('沒有可用的動畫')
-            }
-        } catch (error) {
-            console.error('動畫播放錯誤:', error)
-        }
+        // try {
+        //     // 檢查是否有可用的動畫
+        //     if (actions && Object.keys(actions).length > 0) {
+        //         const action = actions[Object.keys(actions)[0]]
+        //         if (action) {
+        //             action.setLoop(THREE.LoopRepeat, Infinity)
+        //             action.play()
+        //             action.paused = !uavAnimation
+        //         }
+        //     } else {
+        //         console.log('沒有可用的動畫')
+        //     }
+        // } catch (error) {
+        //     console.error('動畫播放錯誤:', error)
+        // }
 
         generatePath()
 
@@ -409,7 +412,7 @@ export default function UAVFlight({
 
     // 控制動畫播放/暫停
     useEffect(() => {
-        if (mixer && animations && animations.length > 0) {
+        if (mixer && animations && animations.length > 0 && clonedScene) {
             // 只建立 hover 動畫
             const hoverClip = animations.find(
                 (clip: THREE.AnimationClip) => clip.name === 'hover'
@@ -419,16 +422,24 @@ export default function UAVFlight({
                 hoverAction = mixer.clipAction(hoverClip)
                 hoverAction.reset()
                 hoverAction.setLoop(THREE.LoopRepeat, Infinity)
+
                 if (uavAnimation) {
                     hoverAction.enabled = true
                     hoverAction.play()
                     hoverAction.paused = false
                     hoverAction.setEffectiveWeight(1)
+                    clonedScene.position.y = HOVER_ANIMATION_Y_OFFSET
+                    console.log(
+                        'UAVFlight: Applied hover Y offset:',
+                        HOVER_ANIMATION_Y_OFFSET
+                    )
                 } else {
                     hoverAction.stop()
                     hoverAction.paused = true
                     hoverAction.enabled = false
                     hoverAction.reset()
+                    clonedScene.position.y = 0 // 恢復原始相對 Y 位置
+                    console.log('UAVFlight: Reset hover Y offset.')
                 }
             }
             // 停用所有非 hover 動畫
@@ -450,7 +461,15 @@ export default function UAVFlight({
     useFrame((state, delta) => {
         if (mixer) mixer.update(delta)
         if (group.current) {
-            group.current.position.copy(currentPosition)
+            // 不要在這裡直接修改 group.current.position，currentPosition 已經包含了Z軸位移
+            // group.current.position.copy(currentPosition)
+            // 如果 currentPosition 已經包含了動畫的Z軸位移，那麼上面的 HOVER_ANIMATION_Z_OFFSET 應該加到 currentPosition
+            // 但目前假設動畫位移是 clonsedScene 內部的，由 HOVER_ANIMATION_Z_OFFSET 補償
+            group.current.position.set(
+                currentPosition.x,
+                currentPosition.y,
+                currentPosition.z
+            )
         }
         if (lightRef.current) {
             lightRef.current.position.set(0, 5, 0)
@@ -613,27 +632,6 @@ export default function UAVFlight({
         console.log('UAV 模型載入成功:', clonedScene)
         console.log('光源已添加到組件中')
     }, [clonedScene])
-    useEffect(() => {
-        console.log('=== UAVFlight Animation Debug ===')
-        console.log('uavAnimation:', uavAnimation)
-        console.log('actions:', actions)
-        console.log('animations:', animations)
-        console.log('clonedScene:', clonedScene)
-
-        if (actions && Object.keys(actions).length > 0) {
-            Object.values(actions).forEach((action) => {
-                if (!action) return
-                action.reset()
-                action.setLoop(THREE.LoopRepeat, Infinity)
-                if (uavAnimation) {
-                    action.play()
-                    action.paused = false
-                } else {
-                    action.paused = true
-                }
-            })
-        }
-    }, [actions, uavAnimation, clonedScene])
     return (
         <group ref={group} position={position} scale={scale}>
             <primitive
