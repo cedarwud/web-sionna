@@ -5,10 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Optional
 from pydantic import BaseModel, Field as PydanticField  # Use Pydantic BaseModel
-import sionna.rt
 from sionna.rt import (
     load_scene,
-    Camera,
     Transmitter as SionnaTransmitter,
     Receiver as SionnaReceiver,
     PlanarArray,
@@ -18,17 +16,15 @@ from sionna.rt import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
-import collections.abc  # Import for checking iterable
 
 # Import models and config from their new locations
 from app.db.models import Device, DeviceRole
 from app.core.config import (
-    OUTPUT_DIR,
     NYCU_XML_PATH,
     CFR_PLOT_IMAGE_PATH,
-    UNSCALED_DOPPLER_IMAGE_PATH,
-    POWER_SCALED_DOPPLER_IMAGE_PATH,
     DOPPLER_IMAGE_PATH,
+    CHANNEL_RESPONSE_IMAGE_PATH,
+    SINR_MAP_IMAGE_PATH,
 )
 from app.crud import crud_device  # 導入整合後的 crud_device 模塊
 
@@ -49,6 +45,54 @@ SCENE_BACKGROUND_COLOR_RGB = [0.5, 0.5, 0.5]
 # --- End Constant ---
 
 
+# --- 通用函數：GPU 設置 ---
+def _setup_gpu():
+    """設置 GPU 環境，啟用記憶體增長"""
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+    gpus = tf.config.list_physical_devices("GPU")
+
+    if gpus:
+        try:
+            tf.config.experimental.set_memory_growth(gpus[0], True)
+            logger.info("GPU 記憶體成長已啟用")
+        except Exception as e:
+            logger.warning(f"無法啟用GPU記憶體增長: {e}")
+    else:
+        logger.info("未找到 GPU，使用 CPU")
+
+    return gpus is not None
+
+
+def _clean_output_file(output_path, file_desc="圖檔"):
+    """清理舊的輸出文件"""
+    if os.path.exists(output_path):
+        logger.info(f"刪除舊的{file_desc}: {output_path}")
+        os.remove(output_path)
+        return True
+    return False
+
+
+def _ensure_output_dir(output_path):
+    """確保輸出目錄存在"""
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    return True
+
+
+def _verify_output_file(output_path):
+    """檢查輸出文件是否成功生成"""
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        logger.info(
+            f"成功生成文件: {output_path}, 大小: {os.path.getsize(output_path)} 字節"
+        )
+        return True
+    else:
+        logger.error(f"文件生成失敗或文件為空: {output_path}")
+        return False
+
+
+# --- End Utility Functions ---
+
+
 # --- 定義新的資料容器 ---
 class DeviceData(BaseModel):
     """用於傳遞設備模型和其處理後的位置列表"""
@@ -62,121 +106,6 @@ class DeviceData(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True  # Allow complex types like SQLModel objects
-
-
-# --- Helper Function ---
-def add_to_scene_safe(scene, device):
-    """Safely adds a device to the Sionna scene, warns if it exists."""
-    try:
-        scene.add(device)
-        logger.info(f"Added '{device.name}' to the scene.")
-    except ValueError:
-        logger.warning(f"Device '{device.name}' might already exist in the scene.")
-        pass
-
-
-# --- 更高效率版本的 get_active_devices_from_db 函數 ---
-async def get_active_devices_from_db_efficient(
-    session: AsyncSession,
-) -> tuple[List[DeviceData], List[DeviceData]]:
-    """獲取活動的發射器和接收器設備資料 (使用單次查詢，效率更高)"""
-    logger.info("Fetching active devices from database (efficient version)...")
-
-    # 為特定需求獲取發射器
-    signal_txs = await get_transmitters_by_type(
-        db=session, transmitter_role=DeviceRole.DESIRED, active_only=True
-    )
-    jammer_txs = await get_transmitters_by_type(
-        db=session, transmitter_role=DeviceRole.JAMMER, active_only=True
-    )
-
-    # 獲取接收器
-    receivers_query = select(Device).where(
-        Device.active == True, Device.role == DeviceRole.RECEIVER.value
-    )
-    receivers_result = await session.execute(receivers_query)
-    receivers = receivers_result.scalars().all()
-
-    # 處理發射器數據
-    transmitters_data: List[DeviceData] = []
-
-    # 處理信號發射器
-    for dev_model in signal_txs:
-        pos_list = [dev_model.position_x, dev_model.position_y, dev_model.position_z]
-        ori_list = [
-            dev_model.orientation_x,
-            dev_model.orientation_y,
-            dev_model.orientation_z,
-        ]
-        device_data = DeviceData(
-            device_model=dev_model,
-            position_list=pos_list,
-            orientation_list=ori_list,
-            transmitter_role=DeviceRole.DESIRED,
-        )
-        transmitters_data.append(device_data)
-        logger.info(
-            f"Processed Active Signal Transmitter: {dev_model.name}, Position: {pos_list}, Orientation: {ori_list}"
-        )
-
-    # 處理干擾源發射器
-    for dev_model in jammer_txs:
-        pos_list = [dev_model.position_x, dev_model.position_y, dev_model.position_z]
-        ori_list = [
-            dev_model.orientation_x,
-            dev_model.orientation_y,
-            dev_model.orientation_z,
-        ]
-        device_data = DeviceData(
-            device_model=dev_model,
-            position_list=pos_list,
-            orientation_list=ori_list,
-            transmitter_role=DeviceRole.JAMMER,
-        )
-        transmitters_data.append(device_data)
-        logger.info(
-            f"Processed Active Jammer: {dev_model.name}, Position: {pos_list}, Orientation: {ori_list}"
-        )
-
-    # 處理接收器數據
-    receivers_data: List[DeviceData] = []
-    for dev_model in receivers:
-        pos_list = [dev_model.position_x, dev_model.position_y, dev_model.position_z]
-        ori_list = [
-            dev_model.orientation_x,
-            dev_model.orientation_y,
-            dev_model.orientation_z,
-        ]
-        device_data = DeviceData(
-            device_model=dev_model, position_list=pos_list, orientation_list=ori_list
-        )
-        receivers_data.append(device_data)
-        logger.info(
-            f"Processed Active Receiver: {dev_model.name}, Position: {pos_list}, Orientation: {ori_list}"
-        )
-
-    return transmitters_data, receivers_data
-
-
-# 本地實現get_transmitters_by_type函數
-async def get_transmitters_by_type(
-    db: AsyncSession,
-    *,
-    transmitter_role: DeviceRole,
-    active_only: bool = False,
-) -> List[Device]:
-    """
-    根據發射器角色（DESIRED或JAMMER）獲取設備。
-    """
-    logger.debug(f"Fetching transmitters with role: {transmitter_role}")
-    # 使用role值進行查詢
-    query = select(Device).where(Device.role == transmitter_role.value)
-
-    if active_only:
-        query = query.where(Device.active == True)
-
-    result = await db.execute(query)
-    return result.scalars().all()
 
 
 # --- Helper Function for Pyrender Scene Setup ---
@@ -344,236 +273,6 @@ def _render_crop_and_save(
         return True
     else:
         logger.error(f"Failed to save image or image is empty: {output_path}")
-        return False
-
-
-async def generate_scene_with_paths_image(
-    output_path: str, session: AsyncSession
-) -> bool:
-    logger.info("Entering generate_scene_with_paths_image (using helpers) function...")
-    try:
-        # 刪除舊的圖檔 (如果存在)
-        if os.path.exists(output_path):
-            logger.info(f"刪除舊的場景路徑圖檔: {output_path}")
-            os.remove(output_path)
-
-        # --- 1. Fetch Device Data --- (Keep)
-        transmitters_data, receivers_data = await get_active_devices_from_db_efficient(
-            session
-        )
-        if not transmitters_data or not receivers_data:
-            return False
-
-        # --- 2. Sionna RT Path Calculation --- (Keep)
-        logger.info("Setting up Sionna RT scene for path calculation...")
-        scene_rt = load_scene(sionna.rt.scene.etoile)
-        iso = PlanarArray(num_rows=1, num_cols=1, pattern="iso", polarization="V")
-        scene_rt.tx_array = iso
-        scene_rt.rx_array = iso
-
-        sionna_txs_rt = []  # Keep track of Sionna RT objects
-        for tx_data in transmitters_data:
-            if tx_data.position_list:
-                sionna_tx = SionnaTransmitter(
-                    tx_data.device_model.name,
-                    position=tx_data.position_list,
-                    orientation=tx_data.orientation_list,  # 使用儲存的方向信息
-                )
-                sionna_txs_rt.append(sionna_tx)
-                add_to_scene_safe(scene_rt, sionna_tx)
-
-        sionna_rxs_rt = []
-        valid_rx_positions_exist = False
-        for rx_data in receivers_data:
-            if rx_data.position_list:
-                sionna_rx = SionnaReceiver(
-                    rx_data.device_model.name,
-                    position=rx_data.position_list,
-                    orientation=rx_data.orientation_list,  # 使用儲存的方向信息
-                )
-                sionna_rxs_rt.append(sionna_rx)
-                add_to_scene_safe(scene_rt, sionna_rx)
-                valid_rx_positions_exist = True
-
-        if not valid_rx_positions_exist:
-            logger.error("No receivers with valid positions for path calculation.")
-            return False
-        if not scene_rt.transmitters or not scene_rt.receivers:
-            logger.error("No valid TX/RX added to Sionna RT scene.")
-            return False
-
-        logger.info("Calculating paths using Sionna RT solver...")
-        solver = PathSolver()
-        paths = solver(
-            scene_rt,
-            max_depth=6,
-            los=True,
-            specular_reflection=True,
-            diffuse_reflection=False,
-            refraction=True,
-        )
-        logger.info("Path calculation complete.")
-
-        # --- 3. Setup Base Pyrender Scene using Helper ---
-        pr_scene = _setup_pyrender_scene_from_glb()  # Helper uses this bg color
-        if pr_scene is None:
-            return False
-        logger.info("Base pyrender scene setup complete.")
-
-        # --- 4. Overlay Devices --- (Keep)
-        logger.info("Overlaying devices onto pyrender scene...")
-        # Define cone dimensions and rotation for downward pointing
-        CONE_RADIUS = 12.0  # 放大圓點
-        CONE_HEIGHT = 36.0  # 放大圓點
-        # Rotate cone model (-90 deg around X) to align Trimesh +Z with Pyrender -Y (down)
-        down_rotation_matrix = trimesh.transformations.rotation_matrix(
-            -np.pi / 2, [1, 0, 0]
-        )
-        # Additional tilt (e.g., 45 degrees around X-axis)
-        tilt_angle_rad = np.radians(45)  # Increased tilt
-        tilt_rotation_matrix = trimesh.transformations.rotation_matrix(
-            tilt_angle_rad, [1, 0, 0]
-        )
-
-        # New Colors with better contrast
-        TX_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[1.0, 1.0, 0.0, 1.0]  # Bright Yellow (Keep)
-        )
-        RX_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[1.0, 0.27, 0.0, 1.0]  # Orange-Red
-        )
-        INT_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[0.4, 0.7, 1.0, 1.0]  # 較淺的藍色
-        )
-        # White material for outline
-        WHITE_MATERIAL_PYRENDER = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[1.0, 1.0, 1.0, 1.0]  # White
-        )
-
-        # Outline disk dimensions
-        OUTLINE_RADIUS = CONE_RADIUS + 1.0  # 跟 cone 一起變大
-        OUTLINE_HEIGHT = 0.5  # 保持不變
-
-        # Add transmitters to scene
-        for tx_data in transmitters_data:
-            if tx_data.position_list:
-                pos = tx_data.position_list
-                mat = (
-                    INT_MATERIAL_PYRENDER
-                    if tx_data.transmitter_role == DeviceRole.JAMMER
-                    else TX_MATERIAL_PYRENDER
-                )
-                try:
-                    # Create colored cone
-                    cone = trimesh.creation.cone(radius=CONE_RADIUS, height=CONE_HEIGHT)
-                    device_mesh = pyrender.Mesh.from_trimesh(cone, material=mat)
-                    # Create white outline disk (cylinder)
-                    outline_disk = trimesh.creation.cylinder(
-                        radius=OUTLINE_RADIUS, height=OUTLINE_HEIGHT
-                    )
-                    outline_mesh = pyrender.Mesh.from_trimesh(
-                        outline_disk, material=WHITE_MATERIAL_PYRENDER
-                    )
-
-                    # Pose for cone (tip at ground, pointing down)
-                    translation_matrix = trimesh.transformations.translation_matrix(
-                        [pos[0], pos[2], pos[1]]
-                    )  # Tip at ground Z=pos[2]
-                    # Only apply down rotation, no tilt
-                    cone_pose_matrix = translation_matrix @ down_rotation_matrix
-
-                    # Pose for outline disk (centered at cone base, slightly below)
-                    outline_center_z = (
-                        pos[2] - OUTLINE_HEIGHT / 2 - 0.1
-                    )  # Place slightly below cone tip
-                    outline_translation_matrix = (
-                        trimesh.transformations.translation_matrix(
-                            [pos[0], outline_center_z, pos[1]]
-                        )
-                    )
-                    outline_pose_matrix = outline_translation_matrix
-
-                    # Add outline first, then cone
-                    pr_scene.add(outline_mesh, pose=outline_pose_matrix)
-                    pr_scene.add(device_mesh, pose=cone_pose_matrix)
-
-                    logger.info(
-                        f"Added TX Cone '{tx_data.device_model.name}' with outline to scene"
-                    )
-                except Exception as dev_err:
-                    logger.error(
-                        f"Failed adding TX Cone '{tx_data.device_model.name}' to scene: {dev_err}",
-                        exc_info=True,
-                    )
-        for rx_data in receivers_data:
-            if rx_data.position_list:
-                pos = rx_data.position_list
-                mat = RX_MATERIAL_PYRENDER
-                try:
-                    # Create colored cone
-                    cone = trimesh.creation.cone(radius=CONE_RADIUS, height=CONE_HEIGHT)
-                    device_mesh = pyrender.Mesh.from_trimesh(cone, material=mat)
-                    # Create white outline disk (cylinder)
-                    outline_disk = trimesh.creation.cylinder(
-                        radius=OUTLINE_RADIUS, height=OUTLINE_HEIGHT
-                    )
-                    outline_mesh = pyrender.Mesh.from_trimesh(
-                        outline_disk, material=WHITE_MATERIAL_PYRENDER
-                    )
-
-                    # Pose for cone (tip at ground, pointing down)
-                    translation_matrix = trimesh.transformations.translation_matrix(
-                        [pos[0], pos[2], pos[1]]
-                    )  # Tip at ground Z=pos[2]
-                    # Only apply down rotation, no tilt
-                    cone_pose_matrix = translation_matrix @ down_rotation_matrix
-
-                    # Pose for outline disk (centered at cone base, slightly below)
-                    outline_center_z = (
-                        pos[2] - OUTLINE_HEIGHT / 2 - 0.1
-                    )  # Place slightly below cone tip
-                    outline_translation_matrix = (
-                        trimesh.transformations.translation_matrix(
-                            [pos[0], outline_center_z, pos[1]]
-                        )
-                    )
-                    outline_pose_matrix = outline_translation_matrix
-
-                    # Add outline first, then cone
-                    pr_scene.add(outline_mesh, pose=outline_pose_matrix)
-                    pr_scene.add(device_mesh, pose=cone_pose_matrix)
-
-                    logger.info(
-                        f"Added RX Cone '{rx_data.device_model.name}' with outline to scene"
-                    )
-                except Exception as dev_err:
-                    logger.error(
-                        f"Failed adding RX Cone '{rx_data.device_model.name}' to scene: {dev_err}",
-                        exc_info=True,
-                    )
-        logger.info("Devices overlay complete.")
-
-        # --- 5. Overlay Ray Paths --- (Keep placeholder)
-        logger.warning("Ray path overlay in pyrender is not yet implemented.")
-        # TODO: Implement path overlay
-
-        # --- 6. Render, Crop, and Save using Helper ---
-        success = _render_crop_and_save(
-            pr_scene,
-            output_path,
-            bg_color_float=SCENE_BACKGROUND_COLOR_RGB,
-            padding_x=0,  # Set horizontal padding to 0
-            padding_y=20,  # Keep vertical padding at 20 (or adjust if needed)
-        )
-        return success
-
-    except ImportError as ie:
-        logger.error(f"Import error: {ie}", exc_info=True)
-        return False
-    except Exception as e:
-        logger.error(f"Error in generate_scene_with_paths_image: {e}", exc_info=True)
-        return False
-
         return False
 
 
@@ -915,7 +614,7 @@ async def generate_cfr_plot(
 # 新增 SINR Map 生成函數
 async def generate_sinr_map(
     session: AsyncSession,
-    output_path: str,
+    output_path: str = str(SINR_MAP_IMAGE_PATH),
     sinr_vmin: float = -40,
     sinr_vmax: float = 0,
     cell_size: float = 1.0,
@@ -935,14 +634,7 @@ async def generate_sinr_map(
             os.remove(output_path)
 
         # GPU 設置
-        os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-        gpus = tf.config.list_physical_devices("GPU")
-
-        if gpus:
-            tf.config.experimental.set_memory_growth(gpus[0], True)
-            logger.info("GPU 記憶體成長已啟用")
-        else:
-            logger.info("未找到 GPU，使用 CPU")
+        gpus = _setup_gpu()
 
         # 從數據庫獲取活動的發射器 (desired)
         logger.info("從數據庫獲取活動的發射器...")
@@ -1202,36 +894,16 @@ async def generate_doppler_plots(
     """
     生成延遲多普勒圖 (Delay-Doppler)，基於 delay-doppler-v2.py 的功能
 
-    從數據庫中獲取發射器、接收器和干擾器參數，生成統一的 4x3 延遲多普勒圖
+    從數據庫中獲取發射器、接收器和干擾器參數，生成統一的延遲多普勒圖
     """
     logger.info("開始生成延遲多普勒圖...")
 
     try:
-        # 刪除舊的圖檔 (如果存在)
-        if os.path.exists(output_path):
-            logger.info(f"刪除舊的延遲多普勒圖檔: {output_path}")
-            os.remove(output_path)
+        # 清理輸出文件
+        _clean_output_file(output_path, "延遲多普勒圖檔")
 
-        # 為了向後兼容，同時刪除舊版本的圖檔
-        if os.path.exists(UNSCALED_DOPPLER_IMAGE_PATH):
-            logger.info(f"刪除舊的未縮放延遲多普勒圖檔: {UNSCALED_DOPPLER_IMAGE_PATH}")
-            os.remove(UNSCALED_DOPPLER_IMAGE_PATH)
-
-        if os.path.exists(POWER_SCALED_DOPPLER_IMAGE_PATH):
-            logger.info(
-                f"刪除舊的功率縮放延遲多普勒圖檔: {POWER_SCALED_DOPPLER_IMAGE_PATH}"
-            )
-            os.remove(POWER_SCALED_DOPPLER_IMAGE_PATH)
-
-        # GPU 設置
-        os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-        gpus = tf.config.list_physical_devices("GPU")
-
-        if gpus:
-            tf.config.experimental.set_memory_growth(gpus[0], True)
-            logger.info("GPU 記憶體成長已啟用")
-        else:
-            logger.info("未找到 GPU，使用 CPU")
+        # 設置 GPU
+        _setup_gpu()
 
         # 從資料庫獲取活動的發射器 (desired)
         logger.info("從數據庫獲取活動的發射器...")
@@ -1331,14 +1003,10 @@ async def generate_doppler_plots(
             seed=41,
         )
 
-        RMSOLVER_ARGS = dict(max_depth=10, cell_size=(1.0, 1.0), samples_per_tx=10**7)
-
-        N_SYMBOLS = 1
+        # OFDM 參數
         N_SUBCARRIERS = 1024
         SUBCARRIER_SPACING = 30e3
         num_ofdm_symbols = 1024
-        num_subcarriers = 1024
-        subcarrier_spacing = 30e3
 
         # 建立場景與天線配置
         logger.info(f"從 {NYCU_XML_PATH} 加載場景")
@@ -1400,9 +1068,9 @@ async def generate_doppler_plots(
             )
             return False
 
-        ofdm_symbol_duration = 1 / subcarrier_spacing
-        delay_resolution = ofdm_symbol_duration / num_subcarriers
-        doppler_resolution = subcarrier_spacing / num_ofdm_symbols
+        ofdm_symbol_duration = 1 / SUBCARRIER_SPACING
+        delay_resolution = ofdm_symbol_duration / N_SUBCARRIERS
+        doppler_resolution = SUBCARRIER_SPACING / num_ofdm_symbols
 
         # 計算 CFR
         H_unit = paths.cfr(
@@ -1440,13 +1108,13 @@ async def generate_doppler_plots(
             doppler_resolution,
         )
         delay_bins = (
-            np.arange(0, num_subcarriers * delay_resolution, delay_resolution) / 1e-9
+            np.arange(0, N_SUBCARRIERS * delay_resolution, delay_resolution) / 1e-9
         )
         x, y = np.meshgrid(delay_bins, doppler_bins)
 
         offset = 20
-        x_start = int(num_subcarriers / 2) - offset
-        x_end = int(num_subcarriers / 2) + offset
+        x_start = int(N_SUBCARRIERS / 2) - offset
+        x_end = int(N_SUBCARRIERS / 2) + offset
         y_start = 0
         y_end = offset
         x_grid = x[x_start:x_end, y_start:y_end]
@@ -1494,7 +1162,7 @@ async def generate_doppler_plots(
         figsize = (cols * 4.5, rows * 4.5)
 
         # 確保輸出目錄存在
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        _ensure_output_dir(output_path)
 
         # 繪製單一的統一圖
         logger.info(f"繪製統一的延遲多普勒圖")
@@ -1517,12 +1185,7 @@ async def generate_doppler_plots(
         plt.close(fig)
 
         # 檢查文件是否生成成功
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            logger.info(f"成功生成延遲多普勒圖: {output_path}")
-            return True
-        else:
-            logger.error(f"圖片生成失敗: {output_path}")
-            return False
+        return _verify_output_file(output_path)
 
     except Exception as e:
         logger.exception(f"生成延遲多普勒圖時發生錯誤: {e}")
@@ -1533,7 +1196,7 @@ async def generate_doppler_plots(
 
 # 新增函數: 整合 tf.py 的通道響應圖功能
 async def generate_channel_response_plots(
-    session: AsyncSession, output_path: str
+    session: AsyncSession, output_path: str = str(CHANNEL_RESPONSE_IMAGE_PATH)
 ) -> bool:
     """
     生成通道響應圖 (H_des, H_jam, H_all)，基於 tf.py 中的功能。

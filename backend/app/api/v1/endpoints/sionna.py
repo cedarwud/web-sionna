@@ -12,9 +12,6 @@ from pydantic import BaseModel
 
 from app.api.deps import get_session  # Import dependency
 from app.services.sionna_simulation import (  # Import service functions
-    generate_scene_with_paths_image,
-    get_active_devices_from_db_efficient,
-    add_to_scene_safe,
     generate_empty_scene_image,
     generate_cfr_plot,  # 新增: 導入剛添加的 CFR 繪圖函數
     generate_sinr_map,  # 新增: 導入 SINR 地圖生成函數
@@ -22,13 +19,10 @@ from app.services.sionna_simulation import (  # Import service functions
     generate_channel_response_plots,  # 新增: 導入通道響應圖生成函數
 )
 from app.core.config import (  # Import constants
-    SCENE_WITH_PATHS_IMAGE_PATH,
     STATIC_IMAGES_DIR,
     MODELS_DIR,
     CFR_PLOT_IMAGE_PATH,  # 新增: 導入 CFR 圖片路徑
     SINR_MAP_IMAGE_PATH,  # 新增: 導入 SINR 地圖路徑
-    UNSCALED_DOPPLER_IMAGE_PATH,  # 新增: 導入未縮放的延遲多普勒圖路徑
-    POWER_SCALED_DOPPLER_IMAGE_PATH,  # 新增: 導入功率縮放的延遲多普勒圖路徑
     CHANNEL_RESPONSE_IMAGE_PATH,  # 新增: 導入通道響應圖路徑
     DOPPLER_IMAGE_PATH,  # 新增: 導入新的延遲多普勒圖路徑
 )
@@ -74,48 +68,6 @@ async def get_model_glb(model_name: str):
     )
 
 
-@router.get("/scene-image-rt", tags=["Sionna Simulation"])
-async def get_scene_image_rt_endpoint(session: AsyncSession = Depends(get_session)):
-    """Generates and returns the Sionna scene image with RT paths using data from DB."""
-    logger.info("--- API Request: /scene-image-rt ---")
-
-    # 確保對應服務函數會刪除舊的圖檔
-    if await generate_scene_with_paths_image(SCENE_WITH_PATHS_IMAGE_PATH, session):
-        if os.path.exists(SCENE_WITH_PATHS_IMAGE_PATH):
-            file_size = os.path.getsize(SCENE_WITH_PATHS_IMAGE_PATH)
-            logger.info(
-                f"Returning image for {SCENE_WITH_PATHS_IMAGE_PATH} (Size: {file_size} bytes)"
-            )
-
-            # 使用StreamingResponse從文件流直接返回
-            def iterfile():
-                with open(SCENE_WITH_PATHS_IMAGE_PATH, "rb") as f:
-                    # 每次讀取4KB
-                    chunk = f.read(4096)
-                    while chunk:
-                        yield chunk
-                        chunk = f.read(4096)
-
-            return StreamingResponse(
-                iterfile(),
-                media_type="image/png",
-                headers={
-                    "Content-Disposition": f"attachment; filename=scene_with_paths.png"
-                },
-            )
-        else:
-            logger.error(
-                f"File not found after generation: {SCENE_WITH_PATHS_IMAGE_PATH}"
-            )
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to find scene image with paths after rendering.",
-            )
-    else:
-        logger.error("Failed to render scene with paths.")
-        raise HTTPException(status_code=500, detail="Failed to render scene with paths")
-
-
 @router.get("/scene-image-devices", tags=["Sionna Simulation"])
 async def get_scene_image_devices_endpoint():
     """Generates and returns the Sionna scene image with only the base map (no devices)."""
@@ -127,9 +79,6 @@ async def get_scene_image_devices_endpoint():
     if os.path.exists(temp_image_path):
         logger.info(f"刪除舊的空場景圖檔: {temp_image_path}")
         os.remove(temp_image_path)
-
-    # 只產生純地圖，不畫任何節點
-    from app.services.sionna_simulation import generate_empty_scene_image
 
     success = await run_in_threadpool(
         generate_empty_scene_image, output_path=str(temp_image_path)
@@ -157,59 +106,6 @@ async def get_scene_image_devices_endpoint():
         raise HTTPException(
             status_code=500, detail="Failed to render empty scene image."
         )
-
-
-@router.post("/generate-scene-image", tags=["Sionna Scene Management"])
-async def trigger_generate_scene_image(
-    filename: str = Query(
-        "empty_scene.png",
-        description="儲存的圖片檔案名稱 (將存在於 static/images/)",
-    )
-):
-    """
-    觸發伺服器生成基於 GLB 的場景圖像並儲存。
-    """
-    logger.info(f"--- API Request: /generate-scene-image?filename={filename} ---")
-
-    # **安全性**: 基本的檔名驗證，防止路徑遍歷
-    if ".." in filename or "/" in filename or "\\" in filename:
-        raise HTTPException(status_code=400, detail="無效的檔案名稱。")
-
-    # 構造完整的輸出路徑
-    # 確保 STATIC_IMAGES_DIR 是 Path 對象
-    if not isinstance(STATIC_IMAGES_DIR, Path):
-        logger.error(f"STATIC_IMAGES_DIR 設定錯誤，不是 Path 對象: {STATIC_IMAGES_DIR}")
-        raise HTTPException(
-            status_code=500, detail="伺服器配置錯誤: 圖像儲存路徑無效。"
-        )
-
-    output_file_path = STATIC_IMAGES_DIR / filename
-    output_path_str = str(output_file_path)
-
-    # 刪除舊的圖檔 (如果存在)
-    if os.path.exists(output_path_str):
-        logger.info(f"刪除舊的場景圖檔: {output_path_str}")
-        os.remove(output_path_str)
-
-    logger.info(f"請求將渲染圖像儲存至伺服器路徑: {output_path_str}")
-
-    try:
-        # 使用 run_in_threadpool 執行同步函數，避免阻塞
-        success = await run_in_threadpool(
-            generate_empty_scene_image, output_path=output_path_str
-        )
-        if success:
-            logger.info(f"圖像成功生成並儲存至: {output_path_str}")
-            return {
-                "message": "Scene image generated successfully.",
-                "path": output_path_str,  # 回傳相對於伺服器的路徑可能更有用，或是一個可訪問的 URL
-            }
-        else:
-            logger.error(f"伺服器端生成圖像失敗。目標路徑: {output_path_str}")
-            raise HTTPException(status_code=500, detail="伺服器端生成圖像失敗。")
-    except Exception as e:
-        logger.exception(f"呼叫 generate_empty_scene_image 時發生未預期錯誤: {e}")
-        raise HTTPException(status_code=500, detail=f"伺服器內部錯誤: {str(e)}")
 
 
 @router.get("/cfr-plot", tags=["Sionna Simulation"])
@@ -308,8 +204,6 @@ async def get_doppler_plots_endpoint(session: AsyncSession = Depends(get_session
     """
     生成並返回延遲多普勒圖，顯示每個發射器和組合後的延遲多普勒域圖。
     從資料庫中獲取發射器和接收器數據，必須有至少一個活動的發射器和接收器。
-
-    v2 版本: 返回單一統一的 4x3 格式的圖像。
     """
     logger.info("--- API Request: /doppler-plots ---")
 
@@ -318,7 +212,7 @@ async def get_doppler_plots_endpoint(session: AsyncSession = Depends(get_session
         logger.info(f"刪除舊的延遲多普勒圖檔: {DOPPLER_IMAGE_PATH}")
         os.remove(DOPPLER_IMAGE_PATH)
 
-    # 生成延遲多普勒圖 (新版本，單一圖像)
+    # 生成延遲多普勒圖
     success = await generate_doppler_plots(session, str(DOPPLER_IMAGE_PATH))
 
     if not success:
@@ -330,80 +224,7 @@ async def get_doppler_plots_endpoint(session: AsyncSession = Depends(get_session
         logger.error("延遲多普勒圖文件未生成或找不到")
         raise HTTPException(status_code=500, detail="延遲多普勒圖文件未生成或找不到")
 
-    # 返回新版本圖像URL的JSON
-    base_url = "/static/images"  # 前端訪問靜態文件的基礎URL
-    return {
-        "doppler_plot_url": f"{base_url}/delay_doppler.png",  # 新版本的URL
-    }
-
-
-@router.get("/unscaled-doppler-image", tags=["Sionna Simulation"])
-async def get_unscaled_doppler_image(session: AsyncSession = Depends(get_session)):
-    """
-    返回延遲多普勒圖圖像文件。
-
-    為了向後兼容，此端點仍保留，但現在會返回新版本的統一圖像。
-    """
-    logger.info("--- API Request: /unscaled-doppler-image ---")
-
-    # 檢查文件是否已經存在
-    if (
-        not os.path.exists(DOPPLER_IMAGE_PATH)
-        or os.path.getsize(DOPPLER_IMAGE_PATH) == 0
-    ):
-        logger.info("延遲多普勒圖不存在或為空，正在生成...")
-        success = await generate_doppler_plots(session, str(DOPPLER_IMAGE_PATH))
-        if not success:
-            logger.error("生成延遲多普勒圖失敗")
-            raise HTTPException(status_code=500, detail="生成延遲多普勒圖失敗")
-
-    # 再次檢查文件是否存在
-    if not os.path.exists(DOPPLER_IMAGE_PATH):
-        logger.error(f"文件生成後仍不存在: {DOPPLER_IMAGE_PATH}")
-        raise HTTPException(status_code=500, detail="延遲多普勒圖生成失敗")
-
-    # 使用StreamingResponse返回新的圖像文件
-    def iterfile():
-        with open(DOPPLER_IMAGE_PATH, "rb") as f:
-            # 每次讀取4KB
-            chunk = f.read(4096)
-            while chunk:
-                yield chunk
-                chunk = f.read(4096)
-
-    return StreamingResponse(
-        iterfile(),
-        media_type="image/png",
-        headers={"Content-Disposition": f"attachment; filename=delay_doppler.png"},
-    )
-
-
-@router.get("/power-scaled-doppler-image", tags=["Sionna Simulation"])
-async def get_power_scaled_doppler_image(session: AsyncSession = Depends(get_session)):
-    """
-    返回延遲多普勒圖圖像文件。
-
-    為了向後兼容，此端點仍保留，但現在會返回新版本的統一圖像。
-    """
-    logger.info("--- API Request: /power-scaled-doppler-image ---")
-
-    # 檢查文件是否已經存在
-    if (
-        not os.path.exists(DOPPLER_IMAGE_PATH)
-        or os.path.getsize(DOPPLER_IMAGE_PATH) == 0
-    ):
-        logger.info("延遲多普勒圖不存在或為空，正在生成...")
-        success = await generate_doppler_plots(session, str(DOPPLER_IMAGE_PATH))
-        if not success:
-            logger.error("生成延遲多普勒圖失敗")
-            raise HTTPException(status_code=500, detail="生成延遲多普勒圖失敗")
-
-    # 再次檢查文件是否存在
-    if not os.path.exists(DOPPLER_IMAGE_PATH):
-        logger.error(f"文件生成後仍不存在: {DOPPLER_IMAGE_PATH}")
-        raise HTTPException(status_code=500, detail="延遲多普勒圖生成失敗")
-
-    # 使用StreamingResponse返回新的圖像文件
+    # 直接返回圖像流
     def iterfile():
         with open(DOPPLER_IMAGE_PATH, "rb") as f:
             # 每次讀取4KB

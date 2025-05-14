@@ -645,7 +645,6 @@ const DelayDopplerViewer: React.FC<ViewerProps> = ({
     const [error, setError] = useState<string | null>(null)
 
     const imageUrlRef = useRef<string | null>(null)
-    const API_PATH = '/api/v1/sionna/doppler-plots'
 
     const updateTimestamp = useCallback(() => {
         const now = new Date()
@@ -660,26 +659,14 @@ const DelayDopplerViewer: React.FC<ViewerProps> = ({
     const loadDopplerImage = useCallback(() => {
         setIsLoading(true)
         setError(null)
-        fetch(API_PATH)
+        fetch('/api/v1/sionna/doppler-plots')
             .then((response) => {
                 if (!response.ok) {
                     throw new Error(
                         `API 請求失敗: ${response.status} ${response.statusText}`
                     )
                 }
-                return response.json()
-            })
-            .then((data) => {
-                return fetch('/api/v1/sionna/unscaled-doppler-image').then(
-                    (imgResponse) => {
-                        if (!imgResponse.ok) {
-                            throw new Error(
-                                `圖片請求失敗: ${imgResponse.status} ${imgResponse.statusText}`
-                            )
-                        }
-                        return imgResponse.blob()
-                    }
-                )
+                return response.blob()
             })
             .then((blob) => {
                 if (imageUrlRef.current) {
