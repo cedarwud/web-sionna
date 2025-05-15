@@ -1,0 +1,12 @@
+gnbId:     1
+mcc:       "208"
+mnc:       "93"
+gnbName:   "SAT-GNB"
+nrCellId:  0x000001
+nci:       1
+idLength:  28
+tac:       1
+linkIp:    127.0.0.1
+ngapIp:    127.0.0.1
+gtpIp:     127.0.0.1   # ← 这个字段“必须”在这里
+amfIp:     127.0.0.1

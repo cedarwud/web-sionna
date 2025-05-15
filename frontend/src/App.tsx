@@ -5,6 +5,7 @@ import Layout from './components/Layout'
 import Sidebar from './components/Sidebar'
 import Navbar from './components/Navbar'
 import SceneViewer from './components/FloorView'
+import UAVDashboard from './components/UAVDashboard'
 import './App.css'
 import {
     Device as BackendDevice,
@@ -712,10 +713,13 @@ function App() {
                 )
             default:
                 return (
-                    <SceneViewer
-                        devices={tempDevices}
-                        refreshDeviceData={refreshDeviceData}
-                    />
+                    <>
+                        <SceneViewer
+                            devices={tempDevices}
+                            refreshDeviceData={refreshDeviceData}
+                        />
+                        <UAVDashboard />
+                    </>
                 )
         }
     }

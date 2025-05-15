@@ -2,12 +2,14 @@
 from fastapi import APIRouter
 
 # 從 endpoints 目錄導入 sionna 和 devices 路由
-from app.api.v1.endpoints import sionna, devices, check_glb
+from app.api.v1.endpoints import devices, check_glb
+
+# from app.api.v1.endpoints import sionna
 
 api_router = APIRouter()
 
 # 包含現有的 sionna 路由
-api_router.include_router(sionna.router, prefix="/sionna", tags=["Sionna Simulation"])
+# api_router.include_router(sionna.router, prefix="/sionna", tags=["Sionna Simulation"])
 
 # 添加 devices 路由 - 用於處理所有類型的設備，包括干擾源
 # 整合了之前的 jammers 端點功能到 devices 中

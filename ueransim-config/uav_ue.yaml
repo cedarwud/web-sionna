@@ -1,0 +1,6 @@
+imsi:            "208930000000001"
+mcc:             "208"
+mnc:             "93"
+key:             "0123456789ABCDEF0123456789ABCDEF"  # ← 必须正好 32 字符
+op:              "E8ED289DEBA952E4283B54E88E6183CA"
+gnbSearchList:   ["127.0.0.1"]
