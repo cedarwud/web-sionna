@@ -1,5 +1,5 @@
 # ---------------- 基本身分 ----------------
-supi: "208930000000001"     # 或寫 imsi: 亦可
+supi: "imsi-208930000000001"
 mcc:  "208"
 mnc:  "93"
 
@@ -38,7 +38,7 @@ integrityMaxRate:           # v3.2 必填
   downlink: full
 
 # ---------------- 連線目標 ----------------
-gnbSearchList: ["127.0.0.1"] # 要能連到 sat_gnb 的 linkIp
+gnbSearchList: ["sat_gnb"] # 要能連到 sat_gnb 的 linkIp
 
 # ---------------- 初始 PDU session（可省略） ----------------
 sessions:

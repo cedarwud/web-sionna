@@ -13,14 +13,14 @@ idLength: 28    # gNB ID bit-length part of NCI
 tac: 1
 
 # ---------------- 模擬介面位址 ----------------
-linkIp: 127.0.0.1     # UE 端 gnbSearchList 要填同一個
+linkIp: sat_gnb     # UE 端 gnbSearchList 要填同一個
 ngapIp: 127.0.0.1     # N2
 gtpIp:  127.0.0.1     # N3
 
 # ---------------- 必填欄位 ----------------
 amfConfigs:           # ← 就算不用 Core 也要留著
   - address: 127.0.0.1
-    port: 38412
+    port: 9999
 
 slices:               # 至少放一條 S-NSSAI
   - sst: 0x01
