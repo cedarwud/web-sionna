@@ -1,12 +1,32 @@
-gnbId:     1
-mcc:       "208"
-mnc:       "93"
-gnbName:   "SAT-GNB"
-nrCellId:  0x000001
-nci:       1
-idLength:  28
-tac:       1
-linkIp:    127.0.0.1
-ngapIp:    127.0.0.1
-gtpIp:     127.0.0.1   # ← 这个字段“必须”在这里
-amfIp:     127.0.0.1
+# ---------------- 基本身分 ----------------
+gnbId: 1
+mcc: "208"
+mnc: "93"
+gnbName: "SAT-GNB"
+
+# NR Cell Identity
+nrCellId: 0x000001
+nci: 1          # <== 與 nrCellId 差不多即可
+idLength: 28    # gNB ID bit-length part of NCI
+
+# Tracking Area
+tac: 1
+
+# ---------------- 模擬介面位址 ----------------
+linkIp: 127.0.0.1     # UE 端 gnbSearchList 要填同一個
+ngapIp: 127.0.0.1     # N2
+gtpIp:  127.0.0.1     # N3
+
+# ---------------- 必填欄位 ----------------
+amfConfigs:           # ← 就算不用 Core 也要留著
+  - address: 127.0.0.1
+    port: 38412
+
+slices:               # 至少放一條 S-NSSAI
+  - sst: 0x01
+    sd:  0x010203
+
+ignoreStreamIds: true # 非必填，但多數人都設 true
+
+# ---------------- 單機測試開關 ----------------
+ranTester: true       # 開啟後不會真的連 AMF

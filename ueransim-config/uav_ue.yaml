@@ -1,6 +1,48 @@
-imsi:            "208930000000001"
-mcc:             "208"
-mnc:             "93"
-key:             "0123456789ABCDEF0123456789ABCDEF"  # ← 必须正好 32 字符
-op:              "E8ED289DEBA952E4283B54E88E6183CA"
-gnbSearchList:   ["127.0.0.1"]
+# ---------------- 基本身分 ----------------
+supi: "208930000000001"     # 或寫 imsi: 亦可
+mcc:  "208"
+mnc:  "93"
+
+# ---------------- 認證參數 ----------------
+key:    "0123456789ABCDEF0123456789ABCDEF"
+op:     "E8ED289DEBA952E4283B54E88E6183CA"
+opType: "OP"                # 換成 OPC 就填 "OPC"
+amf:    "8000"
+
+# ---------------- UAC ----------------
+uacAic:                     # 必須同時有 mps & mcs
+  mps: false
+  mcs: false
+
+uacAcc:                     # 必須列出 normalClass + class11-15
+  normalClass: 0
+  class11: false
+  class12: false
+  class13: false
+  class14: false
+  class15: false
+
+# ---------------- 加解密能力 ----------------
+integrity:
+  IA1: true
+  IA2: true
+  IA3: true
+
+ciphering:
+  EA1: true
+  EA2: true
+  EA3: true
+
+integrityMaxRate:           # v3.2 必填
+  uplink: full              # 另一選項 64kbps
+  downlink: full
+
+# ---------------- 連線目標 ----------------
+gnbSearchList: ["127.0.0.1"] # 要能連到 sat_gnb 的 linkIp
+
+# ---------------- 初始 PDU session（可省略） ----------------
+sessions:
+  - type: "IPv4"
+    apn: "internet"
+    slice:
+      sst: 1
