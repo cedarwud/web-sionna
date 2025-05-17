@@ -48,20 +48,16 @@ NYCU_DIR.mkdir(parents=True, exist_ok=True)  # 新增: 確保 NYCU 目錄存在
 
 # 定義 GLB 和 XML 路徑 (基於修正後的 MODELS_DIR 和 NYCU_DIR)
 NYCU_GLB_PATH = MODELS_DIR / "NYCU.glb"
-GLB_PATH = MODELS_DIR / "scene.glb"
 NYCU_XML_PATH = NYCU_DIR / "NYCU.xml"  # 新增: NYCU.xml 文件路徑
 
 # 舊版 OUTPUT_DIR，保持定義以兼容可能還在使用的地方，但指向新位置
 OUTPUT_DIR = STATIC_IMAGES_DIR
 
 # 圖片檔案完整路徑 (使用 Path 對象)
-SCENE_WITH_PATHS_IMAGE_PATH = OUTPUT_DIR / "scene_with_paths.png"
-EMPTY_SCENE_IMAGE_PATH = OUTPUT_DIR / "empty_scene.png"
 CFR_PLOT_IMAGE_PATH = OUTPUT_DIR / "cfr_plot.png"  # CFR 圖像路徑
 SINR_MAP_IMAGE_PATH = OUTPUT_DIR / "sinr_map.png"  # SINR 地圖路徑
 # 延遲多普勒圖路徑
 DOPPLER_IMAGE_PATH = OUTPUT_DIR / "delay_doppler.png"  # 延遲多普勒圖路徑
-
 # 通道響應圖路徑
 CHANNEL_RESPONSE_IMAGE_PATH = OUTPUT_DIR / "channel_response_plots.png"
 logger.info(f"Time-Frequency Image Path (in container): {CHANNEL_RESPONSE_IMAGE_PATH}")
@@ -75,10 +71,6 @@ logger.info(f"NYCU GLB Path (in container): {NYCU_GLB_PATH}")
 logger.info(
     f"NYCU XML Path (in container): {NYCU_XML_PATH}"
 )  # 新增: 記錄 NYCU.xml 路徑
-logger.info(f"Default GLB Path (in container): {GLB_PATH}")
-logger.info(
-    f"Scene with Paths Image Path (in container): {SCENE_WITH_PATHS_IMAGE_PATH}"
-)
 logger.info(f"CFR Plot Image Path (in container): {CFR_PLOT_IMAGE_PATH}")
 logger.info(f"SINR Map Image Path (in container): {SINR_MAP_IMAGE_PATH}")
 logger.info(f"DOPPLER Image Path (in container): {DOPPLER_IMAGE_PATH}")

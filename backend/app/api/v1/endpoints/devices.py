@@ -50,47 +50,20 @@ async def read_devices(
     skip: int = 0,
     limit: int = 100,
     role: Optional[str] = Query(None, description="Filter by device role"),
+    active_only: bool = Query(False, description="Get only active devices"),
 ) -> Any:
     """
     獲取設備列表，可選按角色過濾。
     """
     logger.info(
-        f"API: Received request to read devices (skip={skip}, limit={limit}, role={role})"
+        f"API: Received request to read devices (skip={skip}, limit={limit}, role={role}, active_only={active_only})"
     )
 
     devices = await crud_device.get_multi_devices(
-        db=session, skip=skip, limit=limit, role=role
+        db=session, skip=skip, limit=limit, role=role, active_only=active_only
     )
 
     return [DeviceSchema.from_orm(device) for device in devices]
-
-
-@router.get("/jammers", response_model=List[DeviceSchema])
-async def read_jammers(
-    session: AsyncSession = Depends(get_session),
-    skip: int = 0,
-    limit: int = 100,
-) -> Any:
-    """
-    獲取干擾源列表。
-    """
-    logger.info(f"API: Received request to read jammers (skip={skip}, limit={limit})")
-    jammers = await crud_device.get_jammers(db=session, skip=skip, limit=limit)
-    return [DeviceSchema.from_orm(inf) for inf in jammers]
-
-
-@router.get("/receivers", response_model=List[DeviceSchema])
-async def read_receivers(
-    session: AsyncSession = Depends(get_session),
-    skip: int = 0,
-    limit: int = 100,
-) -> Any:
-    """
-    獲取接收器列表。
-    """
-    logger.info(f"API: Received request to read receivers (skip={skip}, limit={limit})")
-    receivers = await crud_device.get_receivers(db=session, skip=skip, limit=limit)
-    return [DeviceSchema.from_orm(inf) for inf in receivers]
 
 
 @router.get("/{device_id}", response_model=DeviceSchema)
@@ -155,7 +128,7 @@ async def delete_device_by_id(
     device_id: int,
 ) -> Any:
     """
-    刪除一個設備，並檢查 tx、rx、jammer 是否都至少一個。
+    刪除一個設備，並檢查系統中是否仍有足夠的必要設備。
     """
     logger.info(f"API: Received request to delete device with ID: {device_id}")
     # 先查出要刪除的設備
@@ -164,15 +137,18 @@ async def delete_device_by_id(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Device not found"
         )
-    # 查詢刪除後剩下的 active tx/rx/jammer 數量
+    # 查詢刪除後剩下的 active 設備數量
     all_active_devices = await crud_device.get_active_devices(db=session)
     # 排除即將刪除的這個設備
     remaining_devices = [d for d in all_active_devices if d.id != device_id]
+
+    # 檢查剩餘設備數量
     tx_count = sum(1 for d in remaining_devices if d.role == DeviceRole.DESIRED.value)
     rx_count = sum(1 for d in remaining_devices if d.role == DeviceRole.RECEIVER.value)
     jammer_count = sum(
         1 for d in remaining_devices if d.role == DeviceRole.JAMMER.value
     )
+
     if tx_count < 1 or rx_count < 1 or jammer_count < 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

@@ -78,8 +78,8 @@ def _ensure_output_dir(output_path):
     return True
 
 
-def _verify_output_file(output_path):
-    """檢查輸出文件是否成功生成"""
+def verify_output_file(output_path):
+    """檢查輸出文件是否成功生成，可被外部調用"""
     if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
         logger.info(
             f"成功生成文件: {output_path}, 大小: {os.path.getsize(output_path)} 字節"
@@ -88,6 +88,14 @@ def _verify_output_file(output_path):
     else:
         logger.error(f"文件生成失敗或文件為空: {output_path}")
         return False
+
+
+# 統一的文件準備函數
+def prepare_output_file(output_path, file_desc="圖檔"):
+    """清理舊文件並準備目錄結構"""
+    _clean_output_file(output_path, file_desc)
+    _ensure_output_dir(output_path)
+    return True
 
 
 # --- End Utility Functions ---
@@ -281,10 +289,8 @@ def generate_empty_scene_image(output_path: str):
     """Generates a cropped scene image by rendering the GLB file (using helpers)."""
     logger.info(f"Entering generate_empty_scene_image function, calling helpers...")
     try:
-        # 刪除舊的圖檔 (如果存在)
-        if os.path.exists(output_path):
-            logger.info(f"刪除舊的空場景圖檔: {output_path}")
-            os.remove(output_path)
+        # 準備輸出檔案
+        prepare_output_file(output_path, "空場景圖檔")
 
         # 1. Setup scene using helper
         pr_scene = _setup_pyrender_scene_from_glb()  # Helper uses this bg color
@@ -322,14 +328,12 @@ async def generate_cfr_plot(
     logger.info("Entering generate_cfr_plot function...")
 
     try:
-        # 刪除舊的圖檔 (如果存在)
-        if os.path.exists(output_path):
-            logger.info(f"刪除舊的 CFR 圖檔: {output_path}")
-            os.remove(output_path)
+        # 準備輸出檔案
+        prepare_output_file(output_path, "CFR 圖檔")
 
         logger.info("Fetching active receivers from database...")
-        active_receivers = await crud_device.get_devices_by_role(
-            db=session, role=DeviceRole.RECEIVER.value, active_only=True
+        active_receivers = await crud_device.get_active_devices(
+            db=session, role=DeviceRole.RECEIVER.value
         )
 
         if not active_receivers:
@@ -352,14 +356,14 @@ async def generate_cfr_plot(
 
         # 從資料庫獲取活動的發射器 (desired)
         logger.info("Fetching active desired transmitters from database...")
-        active_desired = await crud_device.get_devices_by_role(
-            db=session, role=DeviceRole.DESIRED.value, active_only=True
+        active_desired = await crud_device.get_active_devices(
+            db=session, role=DeviceRole.DESIRED.value
         )
 
         # 從資料庫獲取活動的干擾器 (jammer)
         logger.info("Fetching active jammers from database...")
-        active_jammers = await crud_device.get_devices_by_role(
-            db=session, role=DeviceRole.JAMMER.value, active_only=True
+        active_jammers = await crud_device.get_active_devices(
+            db=session, role=DeviceRole.JAMMER.value
         )
 
         # 構建 TX_LIST (發射器和干擾器列表)
@@ -588,21 +592,13 @@ async def generate_cfr_plot(
 
         plt.tight_layout()
 
-        # 確保輸出目錄存在
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
         # 保存圖片
         logger.info(f"Saving plot to {output_path}")
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
         # 檢查文件是否成功生成
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            logger.info(f"Successfully saved CFR plot to {output_path}")
-            return True
-        else:
-            logger.error(f"Failed to save plot to {output_path} or file is empty")
-            return False
+        return verify_output_file(output_path)
 
     except Exception as e:
         logger.exception(f"Error in generate_cfr_plot: {e}")
@@ -628,30 +624,28 @@ async def generate_sinr_map(
     logger.info("開始生成 SINR 地圖...")
 
     try:
-        # 刪除舊的圖檔 (如果存在)
-        if os.path.exists(output_path):
-            logger.info(f"刪除舊的 SINR 地圖圖檔: {output_path}")
-            os.remove(output_path)
+        # 準備輸出檔案
+        prepare_output_file(output_path, "SINR 地圖圖檔")
 
         # GPU 設置
         gpus = _setup_gpu()
 
         # 從數據庫獲取活動的發射器 (desired)
         logger.info("從數據庫獲取活動的發射器...")
-        active_desired = await crud_device.get_devices_by_role(
-            db=session, role=DeviceRole.DESIRED.value, active_only=True
+        active_desired = await crud_device.get_active_devices(
+            db=session, role=DeviceRole.DESIRED.value
         )
 
         # 從數據庫獲取活動的干擾器 (jammer)
         logger.info("從數據庫獲取活動的干擾器...")
-        active_jammers = await crud_device.get_devices_by_role(
-            db=session, role=DeviceRole.JAMMER.value, active_only=True
+        active_jammers = await crud_device.get_active_devices(
+            db=session, role=DeviceRole.JAMMER.value
         )
 
         # 從數據庫獲取活動的接收器
         logger.info("從數據庫獲取活動的接收器...")
-        active_receivers = await crud_device.get_devices_by_role(
-            db=session, role=DeviceRole.RECEIVER.value, active_only=True
+        active_receivers = await crud_device.get_active_devices(
+            db=session, role=DeviceRole.RECEIVER.value
         )
 
         # 檢查是否有足夠的設備
@@ -863,21 +857,13 @@ async def generate_sinr_map(
         ax.invert_yaxis()
         plt.tight_layout()
 
-        # 確保輸出目錄存在
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
         # 保存圖片
         logger.info(f"保存 SINR 地圖到 {output_path}")
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
         # 檢查文件是否生成成功
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            logger.info(f"成功保存 SINR 地圖到 {output_path}")
-            return True
-        else:
-            logger.error(f"保存 SINR 地圖到 {output_path} 失敗或文件為空")
-            return False
+        return verify_output_file(output_path)
 
     except Exception as e:
         logger.exception(f"生成 SINR 地圖時發生錯誤: {e}")
@@ -899,28 +885,28 @@ async def generate_doppler_plots(
     logger.info("開始生成延遲多普勒圖...")
 
     try:
-        # 清理輸出文件
-        _clean_output_file(output_path, "延遲多普勒圖檔")
+        # 準備輸出檔案
+        prepare_output_file(output_path, "延遲多普勒圖檔")
 
         # 設置 GPU
         _setup_gpu()
 
         # 從資料庫獲取活動的發射器 (desired)
         logger.info("從數據庫獲取活動的發射器...")
-        active_desired = await crud_device.get_devices_by_role(
-            db=session, role=DeviceRole.DESIRED.value, active_only=True
+        active_desired = await crud_device.get_active_devices(
+            db=session, role=DeviceRole.DESIRED.value
         )
 
         # 從資料庫獲取活動的干擾器 (jammer)
         logger.info("從數據庫獲取活動的干擾器...")
-        active_jammers = await crud_device.get_devices_by_role(
-            db=session, role=DeviceRole.JAMMER.value, active_only=True
+        active_jammers = await crud_device.get_active_devices(
+            db=session, role=DeviceRole.JAMMER.value
         )
 
         # 從資料庫獲取活動的接收器
         logger.info("從數據庫獲取活動的接收器...")
-        active_receivers = await crud_device.get_devices_by_role(
-            db=session, role=DeviceRole.RECEIVER.value, active_only=True
+        active_receivers = await crud_device.get_active_devices(
+            db=session, role=DeviceRole.RECEIVER.value
         )
 
         # 構建 TX_LIST
@@ -1161,9 +1147,6 @@ async def generate_doppler_plots(
         # 調整圖像大小使其擴展到容器寬度 - 使用與原始相同的圖像大小計算
         figsize = (cols * 4.5, rows * 4.5)
 
-        # 確保輸出目錄存在
-        _ensure_output_dir(output_path)
-
         # 繪製單一的統一圖
         logger.info(f"繪製統一的延遲多普勒圖")
         fig = plt.figure(figsize=figsize)
@@ -1185,7 +1168,7 @@ async def generate_doppler_plots(
         plt.close(fig)
 
         # 檢查文件是否生成成功
-        return _verify_output_file(output_path)
+        return verify_output_file(output_path)
 
     except Exception as e:
         logger.exception(f"生成延遲多普勒圖時發生錯誤: {e}")
@@ -1205,27 +1188,25 @@ async def generate_channel_response_plots(
     logger.info("開始生成通道響應圖...")
 
     try:
-        # 刪除舊的圖檔 (如果存在)
-        if os.path.exists(output_path):
-            logger.info(f"刪除舊的通道響應圖檔: {output_path}")
-            os.remove(output_path)
+        # 準備輸出檔案
+        prepare_output_file(output_path, "通道響應圖檔")
 
         # 從資料庫獲取活動的發射器 (desired)
         logger.info("從數據庫獲取活動的發射器...")
-        active_desired = await crud_device.get_devices_by_role(
-            db=session, role=DeviceRole.DESIRED.value, active_only=True
+        active_desired = await crud_device.get_active_devices(
+            db=session, role=DeviceRole.DESIRED.value
         )
 
         # 從資料庫獲取活動的干擾器 (jammer)
         logger.info("從數據庫獲取活動的干擾器...")
-        active_jammers = await crud_device.get_devices_by_role(
-            db=session, role=DeviceRole.JAMMER.value, active_only=True
+        active_jammers = await crud_device.get_active_devices(
+            db=session, role=DeviceRole.JAMMER.value
         )
 
         # 從資料庫獲取活動的接收器
         logger.info("從數據庫獲取活動的接收器...")
-        active_receivers = await crud_device.get_devices_by_role(
-            db=session, role=DeviceRole.RECEIVER.value, active_only=True
+        active_receivers = await crud_device.get_active_devices(
+            db=session, role=DeviceRole.RECEIVER.value
         )
 
         # 檢查是否有足夠的設備進行模擬
@@ -1439,21 +1420,13 @@ async def generate_channel_response_plots(
 
         plt.tight_layout()
 
-        # 確保輸出目錄存在
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
         # 保存圖片
         logger.info(f"保存通道響應圖到 {output_path}")
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
         # 檢查文件是否生成成功
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            logger.info(f"成功保存通道響應圖到 {output_path}")
-            return True
-        else:
-            logger.error(f"保存通道響應圖到 {output_path} 失敗或文件為空")
-            return False
+        return verify_output_file(output_path)
 
     except Exception as e:
         logger.exception(f"生成通道響應圖時發生錯誤: {e}")

@@ -72,18 +72,24 @@ async def get_multi_devices(
     skip: int = 0,
     limit: int = 100,
     role: Optional[str] = None,
+    active_only: bool = False,
 ) -> Sequence[Device]:
     """
-    獲取設備列表，可選按角色過濾。
+    獲取設備列表，可選按角色過濾和是否只返回活躍設備。
     """
-    logger.debug(f"Fetching multiple devices (skip={skip}, limit={limit}, role={role})")
+    logger.debug(
+        f"Fetching multiple devices (skip={skip}, limit={limit}, role={role}, active_only={active_only})"
+    )
 
     # 基礎查詢
     query = select(Device)
 
-    # 如果指定了角色，添加角色過濾條件
+    # 過濾條件
     if role:
         query = query.where(Device.role == role)
+
+    if active_only:
+        query = query.where(Device.active == True)
 
     # 添加分頁
     query = query.offset(skip).limit(limit)
@@ -92,24 +98,16 @@ async def get_multi_devices(
     return result.scalars().all()
 
 
-# --- Get Jammers ---
-async def get_jammers(
-    db: AsyncSession, *, skip: int = 0, limit: int = 100
-) -> Sequence[Device]:
+# --- Get Active Devices ---
+async def get_active_devices(
+    db: AsyncSession,
+    *,
+    role: Optional[str] = None,
+) -> List[Device]:
     """
-    獲取所有角色為 jammer 的設備。
+    獲取活躍的設備列表，可選按角色過濾。
     """
-    return await get_multi_devices(db, skip=skip, limit=limit, role=DeviceRole.JAMMER)
-
-
-# --- Get Receivers ---
-async def get_receivers(
-    db: AsyncSession, *, skip: int = 0, limit: int = 100
-) -> Sequence[Device]:
-    """
-    獲取所有角色為 receiver 的設備。
-    """
-    return await get_multi_devices(db, skip=skip, limit=limit, role=DeviceRole.RECEIVER)
+    return await get_multi_devices(db=db, role=role, active_only=True)
 
 
 # --- Update Device by ID ---
@@ -155,50 +153,6 @@ async def remove_device(db: AsyncSession, *, device_id: int) -> Optional[Device]
         await db.rollback()
         logger.error(f"Error removing device with ID {device_id}: {e}", exc_info=True)
         raise
-
-
-# --- Get Devices by Role ---
-async def get_devices_by_role(
-    db: AsyncSession,
-    *,
-    role: str,
-    skip: int = 0,
-    limit: int = 100,
-    active_only: bool = False,
-) -> Sequence[Device]:
-    """
-    根據角色獲取設備列表。
-    """
-    logger.debug(f"Fetching devices with role: {role}")
-    query = select(Device).where(Device.role == role)
-
-    if active_only:
-        query = query.where(Device.active == True)
-
-    query = query.offset(skip).limit(limit)
-
-    result = await db.execute(query)
-    return result.scalars().all()
-
-
-# --- Get Active Devices ---
-async def get_active_devices(
-    db: AsyncSession,
-    *,
-    role: Optional[str] = None,
-) -> List[Device]:
-    """
-    獲取活躍的設備列表，可選按角色過濾。
-    """
-    logger.debug(f"Fetching active devices (role={role})")
-
-    query = select(Device).where(Device.active == True)
-
-    if role:
-        query = query.where(Device.role == role)
-
-    result = await db.execute(query)
-    return result.scalars().all()
 
 
 # --- Update Device ---
