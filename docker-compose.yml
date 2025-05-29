@@ -1,0 +1,118 @@
+# =============================================================================
+# Sionna RT 無線電模擬系統 - Docker Compose 配置
+# =============================================================================
+# 這個 Docker Compose 文件定義了完整的 Sionna RT 系統架構
+# 包含前端、後端和資料庫三個核心服務
+# =============================================================================
+
+services:
+    # -------------------------------------------------------------------------
+    # PostgreSQL + PostGIS 資料庫服務
+    # -------------------------------------------------------------------------
+    postgis:
+        image: postgis/postgis:16-3.4 # PostgreSQL 16 + PostGIS 3.4（地理信息系統擴展）
+        container_name: sionna_db # 容器名稱，用於內部網路通信
+        env_file:
+            - ./.env # 從項目根目錄的 .env 文件讀取環境變數
+        environment:
+            # 資料庫基本配置，使用環境變數或預設值
+            POSTGRES_USER: ${POSTGRES_USER:-user} # 資料庫用戶名
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password} # 資料庫密碼
+            POSTGRES_DB: ${POSTGRES_DB:-appdb} # 資料庫名稱
+        volumes:
+            # 將資料庫數據持久化到 Docker 卷，避免容器重啟時數據丟失
+            - postgres_data:/var/lib/postgresql/data
+        ports:
+            # 將主機的 5433 端口映射到容器的 5432（PostgreSQL 預設端口）
+            # 使用 5433 避免與本機 PostgreSQL 衝突
+            - '${POSTGRES_PORT:-5433}:5432'
+        networks:
+            - sionna-net # 加入自定義網路，允許服務間通信
+        healthcheck:
+            # 健康檢查：確保資料庫服務正常運行
+            test:
+                ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+            interval: 10s # 每 10 秒檢查一次
+            timeout: 5s # 檢查超時時間
+            retries: 5 # 失敗重試次數
+
+    # -------------------------------------------------------------------------
+    # FastAPI 後端服務
+    # -------------------------------------------------------------------------
+    backend:
+        build:
+            context: ./backend # 後端應用的建構上下文目錄
+            dockerfile: Dockerfile # 使用的 Dockerfile
+        container_name: sionna_backend # 容器名稱
+        env_file:
+            - ./.env # 從環境變數文件讀取配置
+        environment:
+            # 資料庫連接字串：使用 asyncpg 驅動連接到 postgis 服務
+            DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@postgis:5432/${POSTGRES_DB:-appdb}
+        ports:
+            # 將主機的 8889 端口映射到容器的 8000（FastAPI 預設端口）
+            - '${BACKEND_PORT:-8889}:8000'
+        volumes:
+            # 開發模式：將本地代碼目錄映射到容器內，支援熱重載
+            - ./backend:/app
+            # 避免本地和容器內的 node_modules 衝突
+            - node_modules:/app/node_modules
+        depends_on:
+            postgis:
+                condition: service_healthy # 等待 PostgreSQL 健康檢查通過後才啟動
+        networks:
+            - sionna-net # 加入自定義網路
+        healthcheck:
+            # 後端健康檢查：確保 API 服務正常響應
+            test: ['CMD', 'curl', '-f', 'http://localhost:8000/ping']
+            interval: 30s # 每 30 秒檢查一次
+            timeout: 10s # 檢查超時時間
+            retries: 3 # 失敗重試次數
+
+    # -------------------------------------------------------------------------
+    # React + Vite 前端服務
+    # -------------------------------------------------------------------------
+    frontend:
+        build:
+            context: ./frontend # 前端應用的建構上下文目錄
+            dockerfile: Dockerfile # 使用的 Dockerfile
+        container_name: sionna_frontend # 容器名稱
+        ports:
+            # 將主機的 5174 端口映射到容器的 5173（Vite 預設端口）
+            - '5174:5173'
+        volumes:
+            # 開發模式：將本地代碼目錄映射到容器內，支援熱重載
+            - ./frontend:/app
+            # 避免本地和容器內的 node_modules 衝突
+            - node_modules:/app/node_modules
+        depends_on:
+            - backend # 前端依賴後端服務（API 調用）
+        networks:
+            - sionna-net # 加入自定義網路
+        # 注意：前端通常不需要健康檢查，因為 Vite 開發伺服器會自動處理
+
+# =============================================================================
+# Docker 卷定義（用於數據持久化）
+# =============================================================================
+volumes:
+    postgres_data:
+        # PostgreSQL 資料庫數據卷
+        # 數據將持久化存儲在 Docker 管理的卷中
+        driver: local
+    node_modules:
+        # Node.js 依賴卷
+        # 避免本地 node_modules 與容器內版本衝突
+        driver: local
+
+# =============================================================================
+# Docker 網路定義（用於服務間通信）
+# =============================================================================
+networks:
+    sionna-net:
+        # 自定義橋接網路，讓容器間可以通過服務名稱互相通信
+        # 例如：後端可以通過 'postgis' 主機名連接資料庫
+        driver: bridge
+        # 可選：為網路添加標籤
+        labels:
+            - 'project=sionna-rt'
+            - 'environment=development'
